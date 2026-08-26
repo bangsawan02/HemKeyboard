@@ -1,0 +1,38 @@
+# Gradle files
+.gradle/
+build/
+app/build/
+
+# Kotlin / IntelliJ
+.kotlin/
+.idea/
+*.iml
+
+# Android specific
+/local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+debug.keystore
+debug.keystore.base64
+
+# AI Studio / Platform specific
+.build-outputs/
+metadata.json
+test_message
+*.jks
+
+# Environment
+.env
+.env.example
+
+# APKs - Ignore all by default
+*.apk
+/app/build/outputs/apk/
+/app/build/outputs/bundle/
+
+# Except the one we specifically want to release
+!release/app-release.apk
+
+# Others
+.DS_Store
