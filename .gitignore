@@ -24,7 +24,6 @@ test_message
 
 # Environment
 .env
-.env.example
 
 # APKs - Ignore all by default
 *.apk
