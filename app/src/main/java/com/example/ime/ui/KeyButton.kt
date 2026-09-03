@@ -150,7 +150,8 @@ fun KeyButton(
                     .shadow(6.dp, RoundedCornerShape(10.dp))
                     .clip(RoundedCornerShape(10.dp))
                     .background(backgroundColor)
-                    .border(1.dp, borderColor.copy(alpha = 0.6f), RoundedCornerShape(10.dp)),
+                    .border(1.dp, borderColor.copy(alpha = 0.6f), RoundedCornerShape(10.dp))
+                    .pointerInput(Unit) { },
                 contentAlignment = Alignment.Center
             ) {
                 Text(

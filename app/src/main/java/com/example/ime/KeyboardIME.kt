@@ -307,6 +307,7 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
         updateActionLabel(info)
         checkAutoCapitalize()
         refreshClipboardPreview()
+        reloadSettingsFromDb()
     }
 
     override fun onStartInput(attribute: EditorInfo?, restarting: Boolean) {
@@ -315,7 +316,10 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
         predictionsList = emptyList()
         inlineSuggestionViews = emptyList()
         updateActionLabel(attribute)
+        reloadSettingsFromDb()
+    }
 
+    private fun reloadSettingsFromDb() {
         lifecycleScope.launch(Dispatchers.IO) {
             val themeVal = database.settingDao().getSetting("keyboard_theme") ?: KeyboardThemeStyle.LIGHT.name
             val heightVal = database.settingDao().getSetting("keyboard_height") ?: KeyboardHeightStyle.NORMAL.name
@@ -377,6 +381,7 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
         super.onWindowShown()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
         refreshClipboardPreview()
+        reloadSettingsFromDb()
     }
 
     override fun onWindowHidden() {

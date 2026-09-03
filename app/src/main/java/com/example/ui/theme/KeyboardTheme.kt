@@ -21,10 +21,10 @@ enum class KeyboardThemeStyle(val displayName: String) {
 }
 
 enum class KeyboardHeightStyle(val displayName: String, val keyHeightDp: Int, val fontSizeSp: Int, val suggestionHeightDp: Int) {
-    COMPACT("Pendek (42dp)", 42, 16, 38),
-    NORMAL("Sedang / Standar (48dp)", 48, 18, 44),
-    TALL("Tinggi (54dp)", 54, 20, 48),
-    EXTRA_TALL("Ekstra Tinggi (60dp)", 60, 22, 52)
+    COMPACT("Pendek / Ringkas (38dp)", 38, 15, 34),
+    NORMAL("Sedang / Standar (46dp)", 46, 17, 40),
+    TALL("Tinggi (54dp)", 54, 20, 46),
+    EXTRA_TALL("Ekstra Tinggi / Besar (64dp)", 64, 22, 52)
 }
 
 enum class KeyShapeStyle(val displayName: String, val cornerRadiusDp: Int) {
