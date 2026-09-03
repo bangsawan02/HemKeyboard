@@ -1,8 +1,15 @@
 package com.example.ui.theme
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
+import android.os.Build
 
 enum class KeyboardThemeStyle(val displayName: String) {
+    DYNAMIC("Dinamis (Material You)"),
     LIGHT("Terang Klasik"),
     DARK("Gelap Modern"),
     AMOLED_BLACK("Hitam AMOLED"),
@@ -40,8 +47,29 @@ data class KeyboardColors(
     val textHighlight: Color
 )
 
+@Composable
 fun getKeyboardColors(theme: KeyboardThemeStyle): KeyboardColors {
+    if (theme == KeyboardThemeStyle.DYNAMIC && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        val context = LocalContext.current
+        val isDark = isSystemInDarkTheme()
+        val dynamicColors = if (isDark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        return KeyboardColors(
+            background = dynamicColors.background,
+            keyBackground = dynamicColors.surfaceVariant,
+            keyText = dynamicColors.onSurfaceVariant,
+            keyBorderColor = dynamicColors.outlineVariant,
+            specialKeyBackground = dynamicColors.secondaryContainer,
+            specialKeyText = dynamicColors.onSecondaryContainer,
+            actionKeyBackground = dynamicColors.primary,
+            actionKeyText = dynamicColors.onPrimary,
+            suggestionBackground = dynamicColors.surface,
+            suggestionText = dynamicColors.onSurface,
+            textHighlight = dynamicColors.primary
+        )
+    }
+
     return when (theme) {
+        KeyboardThemeStyle.DYNAMIC, // Fallback if API < 31
         KeyboardThemeStyle.LIGHT -> KeyboardColors(
             background = Color(0xFFECEFF1),
             keyBackground = Color(0xFFFFFFFF),

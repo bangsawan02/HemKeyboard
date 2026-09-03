@@ -17,6 +17,12 @@ interface WordDao {
     @Query("SELECT * FROM words ORDER BY frequency DESC, timestamp DESC")
     suspend fun getAllWords(): List<WordEntity>
 
+    @Query("SELECT word FROM words WHERE word LIKE :pattern ORDER BY frequency DESC, timestamp DESC LIMIT :limit")
+    suspend fun getFuzzyPredictions(pattern: String, limit: Int = 10): List<String>
+
+    @Query("SELECT * FROM words WHERE word LIKE :firstChar || '%' ORDER BY frequency DESC, timestamp DESC")
+    suspend fun getWordsStartingWith(firstChar: String): List<WordEntity>
+
     @Query("SELECT * FROM words WHERE isUserCustom = 1 ORDER BY frequency DESC, timestamp DESC")
     fun getUserCustomWordsFlow(): Flow<List<WordEntity>>
 

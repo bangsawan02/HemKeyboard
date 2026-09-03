@@ -54,6 +54,7 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
     private var autocorrectEnabled by mutableStateOf(true)
     private var predictionEnabled by mutableStateOf(true)
     private var hapticEnabled by mutableStateOf(true)
+    private var hapticDurationMs by mutableStateOf(30L)
     private var codingBarEnabled by mutableStateOf(true)
     private var cursorArrowsEnabled by mutableStateOf(true)
     private var codeSnippetsEnabled by mutableStateOf(true)
@@ -67,7 +68,6 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
     private var alwaysPredictEnabled by mutableStateOf(false)
     private var predictPasswordsEnabled by mutableStateOf(false)
     private var showPasswordEnabled by mutableStateOf(false)
-    private var suggestionBarActionsEnabled by mutableStateOf(true)
     
     private var lastSpacePressTime: Long = 0
     private var predictionJob: Job? = null
@@ -149,6 +149,7 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
             val autoCorrectVal = database.settingDao().getSetting("autocorrect_enabled") ?: "true"
             val predictionVal = database.settingDao().getSetting("prediction_enabled") ?: "true"
             val hapticVal = database.settingDao().getSetting("haptic_enabled") ?: "true"
+            val hapticDurationVal = database.settingDao().getSetting("haptic_duration_ms") ?: "30"
             val codingBarVal = database.settingDao().getSetting("coding_bar_enabled") ?: "true"
             val cursorArrowsVal = database.settingDao().getSetting("cursor_arrows_enabled") ?: "true"
             val codeSnippetsVal = database.settingDao().getSetting("code_snippets_enabled") ?: "true"
@@ -160,7 +161,6 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
             val alwaysPredictVal = database.settingDao().getSetting("always_predict_enabled") ?: "false"
             val predictPassVal = database.settingDao().getSetting("predict_passwords_enabled") ?: "false"
             val showPassVal = database.settingDao().getSetting("show_password_enabled") ?: "false"
-            val barActionsVal = database.settingDao().getSetting("suggestion_bar_actions_enabled") ?: "true"
 
             withContext(Dispatchers.Main) {
                 activeTheme = try {
@@ -181,6 +181,7 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
                 autocorrectEnabled = autoCorrectVal.toBoolean()
                 predictionEnabled = predictionVal.toBoolean()
                 hapticEnabled = hapticVal.toBoolean()
+                hapticDurationMs = hapticDurationVal.toLongOrNull() ?: 30L
                 codingBarEnabled = codingBarVal.toBoolean()
                 cursorArrowsEnabled = cursorArrowsVal.toBoolean()
                 codeSnippetsEnabled = codeSnippetsVal.toBoolean()
@@ -192,7 +193,6 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
                 alwaysPredictEnabled = alwaysPredictVal.toBoolean()
                 predictPasswordsEnabled = predictPassVal.toBoolean()
                 showPasswordEnabled = showPassVal.toBoolean()
-                suggestionBarActionsEnabled = barActionsVal.toBoolean()
                 updateSuggestions()
             }
         }
@@ -364,16 +364,10 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
             action == "PASTE" -> {
                 val handled = ic.performContextMenuAction(android.R.id.paste)
                 if (!handled) {
-                    try {
-                        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                        val clip = clipboard?.primaryClip?.getItemAt(0)?.text?.toString()
-                        if (!clip.isNullOrEmpty()) {
-                            ic.commitText(clip, 1)
-                        } else {
-                            ic.sendKeyEvent(KeyEvent(0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_V, 0, KeyEvent.META_CTRL_ON))
-                            ic.sendKeyEvent(KeyEvent(0, 0, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_V, 0, KeyEvent.META_CTRL_ON))
-                        }
-                    } catch (e: Exception) {
+                    val clip = com.example.util.NativeClipboardHelper.getPrimaryClipText(this)
+                    if (!clip.isNullOrEmpty()) {
+                        ic.commitText(clip, 1)
+                    } else {
                         ic.sendKeyEvent(KeyEvent(0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_V, 0, KeyEvent.META_CTRL_ON))
                         ic.sendKeyEvent(KeyEvent(0, 0, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_V, 0, KeyEvent.META_CTRL_ON))
                     }
@@ -559,8 +553,9 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
             if (prefix.isNotEmpty() && dbPredictions.size < 3 && vowelOptionalEnabled) {
                 val prefixNoVowels = prefix.filter { it !in "aeiou" }
                 if (prefixNoVowels.isNotEmpty()) {
-                    val allWords = database.wordDao().getAllWords()
-                    val vowelOptionalMatches = allWords.filter { wordEntity ->
+                    val firstChar = prefix[0].toString()
+                    val candidateWords = database.wordDao().getWordsStartingWith(firstChar)
+                    val vowelOptionalMatches = candidateWords.filter { wordEntity ->
                         val wordNoVowels = wordEntity.word.filter { it !in "aeiou" }
                         wordNoVowels.startsWith(prefixNoVowels) && !dbPredictions.contains(wordEntity.word)
                     }.take(5).map { it.word }
@@ -570,24 +565,10 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
 
             // 4. Guess Missing Letters / Fuzzy Matching (Simple version with tolerance)
             if (prefix.length >= 2 && dbPredictions.size < 3 && guessMissingLettersEnabled) {
-                val allWords = database.wordDao().getAllWords()
-                val fuzzyMatches = allWords.filter { wordEntity ->
-                    val word = wordEntity.word
-                    if (dbPredictions.contains(word)) return@filter false
-                    
-                    // Simple fuzzy: word contains all characters of prefix in order
-                    // mistypeTolerance can be used here to allow some missing characters
-                    var prefixIdx = 0
-                    for (char in word) {
-                        if (prefixIdx < prefix.length && char == prefix[prefixIdx]) {
-                            prefixIdx++
-                        }
-                    }
-                    
-                    // Calculate match percentage
-                    val matchPercentage = (prefixIdx.toFloat() / prefix.length) * 100
-                    matchPercentage >= (100 - mistypeTolerance) && prefixIdx > 1
-                }.sortedByDescending { it.frequency }.take(5).map { it.word }
+                val fuzzyPattern = "%" + prefix.toList().joinToString("%") + "%"
+                val fuzzyMatches = database.wordDao().getFuzzyPredictions(fuzzyPattern, 10).filter { word ->
+                    !dbPredictions.contains(word)
+                }.take(5)
                 dbPredictions.addAll(fuzzyMatches)
             }
 
@@ -670,23 +651,9 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
 
 
     private fun triggerFeedback() {
-        val am = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-        am?.playSoundEffect(AudioManager.FX_KEYPRESS_STANDARD)
-
+        com.example.util.NativeAudioFeedback.playKeyPressSound(this)
         if (hapticEnabled) {
-            try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    val vibratorManager = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
-                    vibratorManager?.defaultVibrator?.vibrate(
-                        VibrationEffect.createPredefined(VibrationEffect.EFFECT_CLICK)
-                    )
-                } else {
-                    @Suppress("DEPRECATION")
-                    val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-                    vibrator?.vibrate(VibrationEffect.createOneShot(15, VibrationEffect.DEFAULT_AMPLITUDE))
-                }
-            } catch (_: Exception) {
-            }
+            com.example.util.NativeHapticFeedback.performHapticFeedback(this, hapticDurationMs)
         }
     }
 }

@@ -47,6 +47,9 @@ class KeyboardSettingsViewModel(application: Application) : AndroidViewModel(app
     private val _hapticEnabled = MutableStateFlow(true)
     val hapticEnabled: StateFlow<Boolean> = _hapticEnabled
 
+    private val _hapticDurationMs = MutableStateFlow(30)
+    val hapticDurationMs: StateFlow<Int> = _hapticDurationMs
+
     private val _codingBarEnabled = MutableStateFlow(true)
     val codingBarEnabled: StateFlow<Boolean> = _codingBarEnabled
 
@@ -79,9 +82,6 @@ class KeyboardSettingsViewModel(application: Application) : AndroidViewModel(app
 
     private val _showPasswordEnabled = MutableStateFlow(false)
     val showPasswordEnabled: StateFlow<Boolean> = _showPasswordEnabled
-
-    private val _suggestionBarActionsEnabled = MutableStateFlow(true)
-    val suggestionBarActionsEnabled: StateFlow<Boolean> = _suggestionBarActionsEnabled
 
     val isKeyboardEnabled = mutableStateOf(false)
     val isKeyboardSelected = mutableStateOf(false)
@@ -141,6 +141,7 @@ class KeyboardSettingsViewModel(application: Application) : AndroidViewModel(app
             val autoCorrectVal = database.settingDao().getSetting("autocorrect_enabled") ?: "true"
             val predictionVal = database.settingDao().getSetting("prediction_enabled") ?: "true"
             val hapticVal = database.settingDao().getSetting("haptic_enabled") ?: "true"
+            val hapticDurationVal = database.settingDao().getSetting("haptic_duration_ms") ?: "30"
             val codingBarVal = database.settingDao().getSetting("coding_bar_enabled") ?: "true"
             val cursorArrowsVal = database.settingDao().getSetting("cursor_arrows_enabled") ?: "true"
             val codeSnippetsVal = database.settingDao().getSetting("code_snippets_enabled") ?: "true"
@@ -152,7 +153,6 @@ class KeyboardSettingsViewModel(application: Application) : AndroidViewModel(app
             val alwaysPredictVal = database.settingDao().getSetting("always_predict_enabled") ?: "false"
             val predictPassVal = database.settingDao().getSetting("predict_passwords_enabled") ?: "false"
             val showPassVal = database.settingDao().getSetting("show_password_enabled") ?: "false"
-            val barActionsVal = database.settingDao().getSetting("suggestion_bar_actions_enabled") ?: "true"
 
             withContext(Dispatchers.Main) {
                 _activeTheme.value = try {
@@ -173,6 +173,7 @@ class KeyboardSettingsViewModel(application: Application) : AndroidViewModel(app
                 _autocorrectEnabled.value = autoCorrectVal.toBoolean()
                 _predictionEnabled.value = predictionVal.toBoolean()
                 _hapticEnabled.value = hapticVal.toBoolean()
+                _hapticDurationMs.value = hapticDurationVal.toIntOrNull() ?: 30
                 _codingBarEnabled.value = codingBarVal.toBoolean()
                 _cursorArrowsEnabled.value = cursorArrowsVal.toBoolean()
                 _codeSnippetsEnabled.value = codeSnippetsVal.toBoolean()
@@ -184,24 +185,13 @@ class KeyboardSettingsViewModel(application: Application) : AndroidViewModel(app
                 _alwaysPredictEnabled.value = alwaysPredictVal.toBoolean()
                 _predictPasswordsEnabled.value = predictPassVal.toBoolean()
                 _showPasswordEnabled.value = showPassVal.toBoolean()
-                _suggestionBarActionsEnabled.value = barActionsVal.toBoolean()
             }
         }
     }
 
     fun checkKeyboardStatus() {
-        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-        val enabledList = imm.enabledInputMethodList
-        val isEnabled = enabledList.any { it.packageName == context.packageName }
-
-        val currentInputMethodId = Settings.Secure.getString(
-            context.contentResolver,
-            Settings.Secure.DEFAULT_INPUT_METHOD
-        )
-        val isSelected = currentInputMethodId != null && currentInputMethodId.startsWith(context.packageName)
-
-        isKeyboardEnabled.value = isEnabled
-        isKeyboardSelected.value = isSelected
+        isKeyboardEnabled.value = com.example.util.NativeInputMethodHelper.isKeyboardEnabled(context)
+        isKeyboardSelected.value = com.example.util.NativeInputMethodHelper.isKeyboardSelected(context)
     }
 
     fun updateTheme(theme: KeyboardThemeStyle) {
@@ -243,6 +233,13 @@ class KeyboardSettingsViewModel(application: Application) : AndroidViewModel(app
         _hapticEnabled.value = enabled
         viewModelScope.launch(Dispatchers.IO) {
             database.settingDao().saveSetting(SettingEntity("haptic_enabled", enabled.toString()))
+        }
+    }
+
+    fun updateHapticDuration(duration: Int) {
+        _hapticDurationMs.value = duration
+        viewModelScope.launch(Dispatchers.IO) {
+            database.settingDao().saveSetting(SettingEntity("haptic_duration_ms", duration.toString()))
         }
     }
 
@@ -320,13 +317,6 @@ class KeyboardSettingsViewModel(application: Application) : AndroidViewModel(app
         _showPasswordEnabled.value = enabled
         viewModelScope.launch(Dispatchers.IO) {
             database.settingDao().saveSetting(SettingEntity("show_password_enabled", enabled.toString()))
-        }
-    }
-
-    fun updateSuggestionBarActions(enabled: Boolean) {
-        _suggestionBarActionsEnabled.value = enabled
-        viewModelScope.launch(Dispatchers.IO) {
-            database.settingDao().saveSetting(SettingEntity("suggestion_bar_actions_enabled", enabled.toString()))
         }
     }
 
