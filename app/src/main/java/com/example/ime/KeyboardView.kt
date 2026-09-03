@@ -93,10 +93,14 @@ fun KeyboardView(
         }
     }
 
-    val handleKeyPress = remember(onKeyPress) {
+    val handleKeyPress = remember(onKeyPress, onSpecialPress) {
         { charText: String ->
             if (charText.isNotEmpty()) {
-                onKeyPress(charText.first())
+                if (charText.length > 1) {
+                    onSpecialPress("COMMIT:$charText")
+                } else {
+                    onKeyPress(charText.first())
+                }
                 if (layoutState == KeyboardLayoutState.QWERTY_UPPER) {
                     layoutState = KeyboardLayoutState.QWERTY_LOWER
                 }
@@ -400,7 +404,6 @@ fun KeyboardView(
                         clipboardText = clipboardText,
                         inlineSuggestionViews = inlineSuggestionViews,
                         onSwitchIme = onSwitchIme,
-                        onToggleOneHanded = { keyboardMode = KeyboardMode.ONE_HANDED_RIGHT },
                         actionLabel = actionLabel,
                         row1 = row1,
                         row1Hints = row1Hints,
@@ -488,7 +491,6 @@ private fun KeyboardMainContent(
     clipboardText: String?,
     inlineSuggestionViews: List<View>,
     onSwitchIme: () -> Unit,
-    onToggleOneHanded: (() -> Unit)? = null,
     actionLabel: String,
     row1: List<String>,
     row1Hints: List<String>,
@@ -511,15 +513,11 @@ private fun KeyboardMainContent(
             suggestionHeight = suggestionHeight,
             cornerRadius = cornerRadius,
             heightStyle = heightStyle,
-            layoutState = layoutState,
-            onEditToggle = handleEditToggle,
-            onEmojiToggle = handleEmojiToggle,
             onVoiceClick = onVoiceClick,
             isVoiceListening = isVoiceListening,
             clipboardText = clipboardText,
             onClipboardPaste = { text -> onSpecialPress("COMMIT:$text") },
-            inlineSuggestionViews = inlineSuggestionViews,
-            onSwitchIme = onSwitchIme
+            inlineSuggestionViews = inlineSuggestionViews
         )
 
         Spacer(modifier = Modifier.height(4.dp))
@@ -824,9 +822,10 @@ private fun KeyboardMainContent(
             val symInteraction = remember { MutableInteractionSource() }
             val isSymPressed by symInteraction.collectIsPressedAsState()
 
+            // 1. Symbols Toggle Key (?123 / abc)
             Box(
                 modifier = Modifier
-                    .weight(1.1f)
+                    .weight(1.0f)
                     .height(keyHeight)
                     .padding(horizontal = 1.5.dp)
                     .clip(RoundedCornerShape(cornerRadius))
@@ -848,30 +847,40 @@ private fun KeyboardMainContent(
                 )
             }
 
+            // 2. Emoji Keyboard Toggle Key
+            val isEmojiActive = layoutState == KeyboardLayoutState.EMOJI
             Box(
                 modifier = Modifier
-                    .weight(0.9f)
+                    .weight(0.85f)
                     .height(keyHeight)
                     .padding(horizontal = 1.5.dp)
                     .clip(RoundedCornerShape(cornerRadius))
-                    .background(colors.specialKeyBackground)
-                    .clickable { onSwitchIme() }
-                    .testTag("key_globe_switch"),
+                    .background(if (isEmojiActive) colors.actionKeyBackground.copy(alpha = 0.30f) else colors.specialKeyBackground)
+                    .then(
+                        if (isEmojiActive && colors.keyBorderColor != Color.Transparent)
+                            Modifier.border(0.8.dp, colors.textHighlight.copy(alpha = 0.5f), RoundedCornerShape(cornerRadius))
+                        else if (colors.keyBorderColor != Color.Transparent)
+                            Modifier.border(0.8.dp, colors.keyBorderColor.copy(alpha = 0.4f), RoundedCornerShape(cornerRadius))
+                        else Modifier
+                    )
+                    .clickable { handleEmojiToggle() }
+                    .testTag("key_emoji_toggle"),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = Icons.Default.Language,
-                    contentDescription = "Ganti Bahasa / Keyboard",
-                    tint = colors.specialKeyText,
-                    modifier = Modifier.size((heightStyle.keyHeightDp * 0.40).dp.coerceIn(18.dp, 22.dp))
+                    imageVector = Icons.Default.SentimentSatisfiedAlt,
+                    contentDescription = "Panel Emoji",
+                    tint = if (isEmojiActive) colors.textHighlight else colors.specialKeyText,
+                    modifier = Modifier.size((heightStyle.keyHeightDp * 0.42).dp.coerceIn(18.dp, 22.dp))
                 )
             }
 
+            // 3. Comma Key
             KeyButton(
                 text = ",",
                 hintText = ";",
                 onKeyClick = handleKeyPress,
-                modifier = Modifier.weight(0.8f),
+                modifier = Modifier.weight(0.75f),
                 keyHeight = keyHeight,
                 fontSize = fontSize,
                 cornerRadius = cornerRadius,
@@ -881,13 +890,14 @@ private fun KeyboardMainContent(
                 enableKeyPreview = enableKeyPreview
             )
 
+            // 4. Space Bar Key with Swipe Cursor Control
             var bottomDragAmount by remember { mutableFloatStateOf(0f) }
             val spaceInteraction = remember { MutableInteractionSource() }
             val isSpacePressed by spaceInteraction.collectIsPressedAsState()
 
             Box(
                 modifier = Modifier
-                    .weight(3.4f)
+                    .weight(2.9f)
                     .height(keyHeight)
                     .padding(horizontal = 1.5.dp)
                     .clip(RoundedCornerShape(cornerRadius))
@@ -924,11 +934,40 @@ private fun KeyboardMainContent(
                 )
             }
 
+            // 5. Edit Mode Toggle Key
+            val isEditActive = layoutState == KeyboardLayoutState.EDIT
+            Box(
+                modifier = Modifier
+                    .weight(0.85f)
+                    .height(keyHeight)
+                    .padding(horizontal = 1.5.dp)
+                    .clip(RoundedCornerShape(cornerRadius))
+                    .background(if (isEditActive) colors.actionKeyBackground.copy(alpha = 0.30f) else colors.specialKeyBackground)
+                    .then(
+                        if (isEditActive && colors.keyBorderColor != Color.Transparent)
+                            Modifier.border(0.8.dp, colors.textHighlight.copy(alpha = 0.5f), RoundedCornerShape(cornerRadius))
+                        else if (colors.keyBorderColor != Color.Transparent)
+                            Modifier.border(0.8.dp, colors.keyBorderColor.copy(alpha = 0.4f), RoundedCornerShape(cornerRadius))
+                        else Modifier
+                    )
+                    .clickable { handleEditToggle() }
+                    .testTag("key_edit_toggle"),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Edit,
+                    contentDescription = "Mode Edit Teks",
+                    tint = if (isEditActive) colors.textHighlight else colors.specialKeyText,
+                    modifier = Modifier.size((heightStyle.keyHeightDp * 0.40).dp.coerceIn(18.dp, 22.dp))
+                )
+            }
+
+            // 6. Period Key
             KeyButton(
                 text = ".",
                 hintText = "!",
                 onKeyClick = handleKeyPress,
-                modifier = Modifier.weight(0.8f),
+                modifier = Modifier.weight(0.75f),
                 keyHeight = keyHeight,
                 fontSize = fontSize,
                 cornerRadius = cornerRadius,
@@ -938,12 +977,13 @@ private fun KeyboardMainContent(
                 enableKeyPreview = enableKeyPreview
             )
 
+            // 7. Enter / Action Key
             val enterInteraction = remember { MutableInteractionSource() }
             val isEnterPressed by enterInteraction.collectIsPressedAsState()
 
             Box(
                 modifier = Modifier
-                    .weight(1.3f)
+                    .weight(1.25f)
                     .height(keyHeight)
                     .padding(horizontal = 1.5.dp)
                     .clip(RoundedCornerShape(cornerRadius))

@@ -74,13 +74,13 @@ fun SettingsScreen(
     val context = LocalContext.current
     val scrollState = rememberScrollState()
 
-    val activeTheme by viewModel.activeTheme.collectAsState()
-    val heightStyle by viewModel.heightStyle.collectAsState()
-    val shapeStyle by viewModel.shapeStyle.collectAsState()
-    val autocorrectEnabled by viewModel.autocorrectEnabled.collectAsState()
-    val predictionEnabled by viewModel.predictionEnabled.collectAsState()
-    val hapticEnabled by viewModel.hapticEnabled.collectAsState()
-    val hapticDurationMs by viewModel.hapticDurationMs.collectAsState()
+    val activeTheme by viewModel.activeTheme.collectAsStateWithLifecycle()
+    val heightStyle by viewModel.heightStyle.collectAsStateWithLifecycle()
+    val shapeStyle by viewModel.shapeStyle.collectAsStateWithLifecycle()
+    val autocorrectEnabled by viewModel.autocorrectEnabled.collectAsStateWithLifecycle()
+    val predictionEnabled by viewModel.predictionEnabled.collectAsStateWithLifecycle()
+    val hapticEnabled by viewModel.hapticEnabled.collectAsStateWithLifecycle()
+    val hapticDurationMs by viewModel.hapticDurationMs.collectAsStateWithLifecycle()
     
     val vowelOptionalEnabled by viewModel.vowelOptionalEnabled.collectAsStateWithLifecycle()
     val guessMissingLettersEnabled by viewModel.guessMissingLettersEnabled.collectAsStateWithLifecycle()

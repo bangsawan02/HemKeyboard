@@ -93,6 +93,7 @@ fun KeyboardPreviewCard(
                     onSpecialPress = { action ->
                         when {
                             action == "BACKSPACE" -> if (previewTypedText.isNotEmpty()) previewTypedText = previewTypedText.dropLast(1)
+                            action == "DEL" -> if (previewTypedText.isNotEmpty()) previewTypedText = previewTypedText.drop(1)
                             action == "SPACE" -> previewTypedText += " "
                             action == "ENTER" -> previewTypedText += "\n"
                             action == "TAB" -> previewTypedText += "    "
@@ -106,9 +107,15 @@ fun KeyboardPreviewCard(
                             action.startsWith("COMMIT:") -> previewTypedText += action.removePrefix("COMMIT:")
                         }
                     },
-                    predictions = if (previewTypedText.isNotEmpty()) listOf(previewTypedText.takeLast(6) + "an", previewTypedText.takeLast(6), previewTypedText.takeLast(6) + "kan") else listOf("Saya", "Yang", "Terima kasih"),
+                    predictions = if (previewTypedText.isNotEmpty()) {
+                        val token = previewTypedText.trim().substringAfterLast(" ", previewTypedText.trim()).takeLast(6)
+                        listOf(token + "an", token, token + "kan", token + "nya")
+                    } else {
+                        listOf("Saya", "Yang", "Terima kasih", "Bisa")
+                    },
                     onPredictionClick = { word ->
-                        previewTypedText = previewTypedText.substringBeforeLast(" ", "") + (if (previewTypedText.contains(" ")) " " else "") + word + " "
+                        val before = previewTypedText.substringBeforeLast(" ", "")
+                        previewTypedText = if (before.isNotEmpty()) "$before $word " else "$word "
                     },
                     activeTheme = activeTheme,
                     heightStyle = heightStyle,

@@ -44,31 +44,21 @@ fun WordSuggestionBar(
     suggestionHeight: Dp,
     cornerRadius: Dp,
     heightStyle: KeyboardHeightStyle,
-    layoutState: KeyboardLayoutState,
-    onEditToggle: () -> Unit,
-    onEmojiToggle: () -> Unit,
     onVoiceClick: () -> Unit = {},
     isVoiceListening: Boolean = false,
     clipboardText: String? = null,
     onClipboardPaste: (String) -> Unit = {},
     inlineSuggestionViews: List<View> = emptyList(),
-    onSwitchIme: () -> Unit = {},
-    onToggleOneHanded: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    // Top 3 Word Predictions formatting logic
+    // 4 Word Predictions formatting logic
     val displayPredictions = remember(predictions, currentWord) {
         if (predictions.isNotEmpty()) {
-            val taken = predictions.take(3)
-            when (taken.size) {
-                1 -> listOf("", taken[0], "")
-                2 -> listOf(taken[0], taken[1], "")
-                else -> taken
-            }
+            predictions.take(4)
         } else if (currentWord.isNotBlank()) {
-            listOf("", currentWord.trim(), "")
+            listOf(currentWord.trim())
         } else {
-            listOf("Saya", "Yang", "Terima kasih")
+            listOf("Saya", "Yang", "Terima kasih", "Bisa")
         }
     }
 
@@ -94,47 +84,7 @@ fun WordSuggestionBar(
             .testTag("word_suggestion_bar"),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // 1. Edit Mode Quick Toggle Button
-        Box(
-            modifier = Modifier
-                .size((suggestionHeight.value - 6).coerceAtLeast(26f).dp)
-                .clip(RoundedCornerShape(cornerRadius.coerceAtMost(6.dp)))
-                .background(if (layoutState == KeyboardLayoutState.EDIT) colors.actionKeyBackground.copy(alpha = 0.25f) else Color.Transparent)
-                .clickable { onEditToggle() }
-                .testTag("suggestion_edit_toggle"),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Default.Edit,
-                contentDescription = "Mode Edit",
-                tint = if (layoutState == KeyboardLayoutState.EDIT) colors.textHighlight else colors.suggestionText,
-                modifier = Modifier.size(17.dp)
-            )
-        }
-
-        Spacer(modifier = Modifier.width(3.dp))
-
-        // 2. Emoji Panel Quick Toggle Button
-        Box(
-            modifier = Modifier
-                .size((suggestionHeight.value - 6).coerceAtLeast(26f).dp)
-                .clip(RoundedCornerShape(cornerRadius.coerceAtMost(6.dp)))
-                .background(if (layoutState == KeyboardLayoutState.EMOJI) colors.actionKeyBackground.copy(alpha = 0.25f) else Color.Transparent)
-                .clickable { onEmojiToggle() }
-                .testTag("suggestion_emoji_toggle"),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Default.SentimentSatisfiedAlt,
-                contentDescription = "Panel Emoji",
-                tint = if (layoutState == KeyboardLayoutState.EMOJI) colors.textHighlight else colors.suggestionText,
-                modifier = Modifier.size(17.dp)
-            )
-        }
-
-        Spacer(modifier = Modifier.width(3.dp))
-
-        // 3. Native Voice Typing Mic Button
+        // 1. Native Voice Typing Mic Button
         Box(
             modifier = Modifier
                 .size((suggestionHeight.value - 6).coerceAtLeast(26f).dp)
@@ -156,9 +106,9 @@ fun WordSuggestionBar(
             )
         }
 
-        Spacer(modifier = Modifier.width(3.dp))
+        Spacer(modifier = Modifier.width(4.dp))
 
-        // 4. Autofill Inline Suggestions (Android 11+ Password Manager / OTP / Credentials)
+        // 2. Autofill Inline Suggestions (Android 11+ Password Manager / OTP / Credentials)
         if (inlineSuggestionViews.isNotEmpty()) {
             Row(
                 modifier = Modifier
@@ -188,7 +138,7 @@ fun WordSuggestionBar(
                 }
             }
         } else if (!clipboardText.isNullOrBlank() && currentWord.isEmpty()) {
-            // 5. Live Clipboard Instant Paste Chip
+            // 3. Live Clipboard Instant Paste Chip
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -224,7 +174,7 @@ fun WordSuggestionBar(
                 }
             }
         } else {
-            // 6. Top 3 Word Predictions Items
+            // 4. 4 Word Predictions Items
             Row(
                 modifier = Modifier
                     .weight(1f)
@@ -234,20 +184,20 @@ fun WordSuggestionBar(
             ) {
                 displayPredictions.forEachIndexed { index, suggestion ->
                     val isReal = suggestion.isNotEmpty()
-                    val isCenterPrimary = (index == 1 && isReal)
+                    val isPrimary = (index == 0 && isReal) // First suggestion is primary highlight
 
                     Box(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxHeight()
-                            .padding(vertical = 2.dp, horizontal = 2.dp)
+                            .padding(vertical = 2.dp, horizontal = 1.5.dp)
                             .clip(RoundedCornerShape(cornerRadius.coerceAtMost(6.dp)))
                             .background(
-                                if (isCenterPrimary) colors.actionKeyBackground.copy(alpha = 0.22f)
+                                if (isPrimary) colors.actionKeyBackground.copy(alpha = 0.22f)
                                 else Color.Transparent
                             )
                             .then(
-                                if (isCenterPrimary && colors.keyBorderColor != Color.Transparent)
+                                if (isPrimary && colors.keyBorderColor != Color.Transparent)
                                     Modifier.border(0.8.dp, colors.textHighlight.copy(alpha = 0.35f), RoundedCornerShape(cornerRadius.coerceAtMost(6.dp)))
                                 else Modifier
                             )
@@ -257,16 +207,16 @@ fun WordSuggestionBar(
                     ) {
                         Text(
                             text = suggestion,
-                            color = if (isCenterPrimary) colors.textHighlight else colors.suggestionText,
-                            fontSize = if (isCenterPrimary) (heightStyle.fontSizeSp - 2).coerceAtLeast(13).sp else (heightStyle.fontSizeSp - 3).coerceAtLeast(11).sp,
-                            fontWeight = if (isCenterPrimary) FontWeight.Bold else FontWeight.Medium,
+                            color = if (isPrimary) colors.textHighlight else colors.suggestionText,
+                            fontSize = if (isPrimary) (heightStyle.fontSizeSp - 3).coerceAtLeast(12).sp else (heightStyle.fontSizeSp - 4).coerceAtLeast(11).sp,
+                            fontWeight = if (isPrimary) FontWeight.Bold else FontWeight.Medium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             textAlign = TextAlign.Center
                         )
                     }
 
-                    if (index < 2) {
+                    if (index < displayPredictions.size - 1) {
                         Spacer(
                             modifier = Modifier
                                 .width(1.dp)

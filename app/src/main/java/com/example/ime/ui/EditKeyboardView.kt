@@ -135,11 +135,10 @@ fun EditKeyboardView(
         Spacer(modifier = Modifier.height(6.dp))
 
         if (activeTab == "FN") {
-            // Fn Keys Layout
+            // Fn Keys Layout (3 rows + unified bottom navigation row)
             val fnRow1 = listOf("F1", "F2", "F3", "F4", "F5", "F6")
             val fnRow2 = listOf("F7", "F8", "F9", "F10", "F11", "F12")
-            val fnRow3 = listOf("ESC", "TAB", "DEL", "CTRL", "ALT", "HOME")
-            val fnRow4 = listOf("END", "PAGE_UP", "PAGE_DOWN", "INS", "PRTSCR", "ENTER")
+            val fnRow3 = listOf("ESC", "TAB", "DEL", "INS", "PRTSCR", "HOME")
 
             val renderFnRow = @Composable { row: List<String> ->
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
@@ -163,24 +162,59 @@ fun EditKeyboardView(
             renderFnRow(fnRow2)
             Spacer(modifier = Modifier.height(4.dp))
             renderFnRow(fnRow3)
-            Spacer(modifier = Modifier.height(4.dp))
-            renderFnRow(fnRow4)
         } else {
-            // 5x4 Edit Key Matrix
-            // Row 1: Cut, Paste, Up, Copy, Select All
+            // 6x3 Edit Key Matrix (3 rows + unified bottom navigation row)
+            // Row 1: Cut, Copy, Paste, Select All, Undo, Redo
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                 EditIconButton(icon = Icons.Default.ContentCut, text = "✂", action = "CUT", onSpecialPress = onSpecialPress, colors = colors, height = rowHeight, cornerRadius = cornerRadius, weight = 1f, testTag = "edit_cut")
-                EditIconButton(icon = Icons.Default.ContentPaste, text = "📋", action = "PASTE", onSpecialPress = onSpecialPress, colors = colors, height = rowHeight, cornerRadius = cornerRadius, weight = 1f, testTag = "edit_paste")
-                EditIconButton(icon = Icons.Default.ArrowDropUp, text = "▲", action = if (activeSelection) "SELECT_UP" else "ARROW_UP", onSpecialPress = onSpecialPress, colors = colors, height = rowHeight, cornerRadius = cornerRadius, weight = 1f, testTag = "edit_up")
                 EditIconButton(icon = Icons.Default.ContentCopy, text = "❐", action = "COPY", onSpecialPress = onSpecialPress, colors = colors, height = rowHeight, cornerRadius = cornerRadius, weight = 1f, testTag = "edit_copy")
+                EditIconButton(icon = Icons.Default.ContentPaste, text = "📋", action = "PASTE", onSpecialPress = onSpecialPress, colors = colors, height = rowHeight, cornerRadius = cornerRadius, weight = 1f, testTag = "edit_paste")
                 EditIconButton(icon = Icons.Default.SelectAll, text = "⌨", action = "SELECT_ALL", onSpecialPress = onSpecialPress, colors = colors, height = rowHeight, cornerRadius = cornerRadius, weight = 1f, testTag = "edit_select_all")
+                EditIconButton(icon = Icons.AutoMirrored.Filled.Undo, text = "↶", action = "UNDO", onSpecialPress = onSpecialPress, colors = colors, height = rowHeight, cornerRadius = cornerRadius, weight = 1f, testTag = "edit_undo")
+                EditIconButton(icon = Icons.AutoMirrored.Filled.Redo, text = "↷", action = "REDO", onSpecialPress = onSpecialPress, colors = colors, height = rowHeight, cornerRadius = cornerRadius, weight = 1f, testTag = "edit_redo")
             }
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // Row 2: Redo, Left, Selection Box Toggle, Right, Undo
+            // Row 2: Page Up, Page Down, Move Up, Home, End, Backspace
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                EditIconButton(icon = Icons.AutoMirrored.Filled.Redo, text = "↷", action = "REDO", onSpecialPress = onSpecialPress, colors = colors, height = rowHeight, cornerRadius = cornerRadius, weight = 1f, testTag = "edit_redo")
+                EditIconButton(icon = Icons.Default.VerticalAlignTop, text = "⇞", action = "PAGE_UP", onSpecialPress = onSpecialPress, colors = colors, height = rowHeight, cornerRadius = cornerRadius, weight = 1f, testTag = "edit_page_up")
+                EditIconButton(icon = Icons.Default.VerticalAlignBottom, text = "⇟", action = "PAGE_DOWN", onSpecialPress = onSpecialPress, colors = colors, height = rowHeight, cornerRadius = cornerRadius, weight = 1f, testTag = "edit_page_down")
+                EditIconButton(icon = Icons.Default.ArrowDropUp, text = "▲", action = if (activeSelection) "SELECT_UP" else "ARROW_UP", onSpecialPress = onSpecialPress, colors = colors, height = rowHeight, cornerRadius = cornerRadius, weight = 1f, testTag = "edit_up")
+                EditIconButton(icon = Icons.Default.SkipPrevious, text = "|<", action = if (activeSelection) "SELECT_HOME" else "CURSOR_HOME", onSpecialPress = onSpecialPress, colors = colors, height = rowHeight, cornerRadius = cornerRadius, weight = 1f, testTag = "edit_home")
+                EditIconButton(icon = Icons.Default.SkipNext, text = ">|", action = if (activeSelection) "SELECT_END" else "CURSOR_END", onSpecialPress = onSpecialPress, colors = colors, height = rowHeight, cornerRadius = cornerRadius, weight = 1f, testTag = "edit_end")
+                EditIconButton(icon = Icons.AutoMirrored.Filled.KeyboardBackspace, text = "⌫", action = "BACKSPACE", onSpecialPress = onSpecialPress, colors = colors, height = rowHeight, cornerRadius = cornerRadius, weight = 1f, isSpecial = true, testTag = "edit_backspace")
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            // Row 3: Lock Selection, Move Left, Selection Toggle, Move Down, Move Right, Delete Forward
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                // Lock Selection Key
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(rowHeight)
+                        .padding(horizontal = 1.5.dp)
+                        .clip(RoundedCornerShape(cornerRadius))
+                        .background(if (isSelectionLocked) Color(0xFFFF9800) else colors.keyBackground)
+                        .then(
+                            if (colors.keyBorderColor != Color.Transparent || isSelectionLocked)
+                                Modifier.border(0.8.dp, if (isSelectionLocked) Color(0xFFFF9800) else colors.keyBorderColor, RoundedCornerShape(cornerRadius))
+                            else Modifier
+                        )
+                        .clickable { isSelectionLocked = !isSelectionLocked }
+                        .testTag("edit_lock_toggle"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = if (isSelectionLocked) Icons.Default.Lock else Icons.Default.LockOpen,
+                        contentDescription = "Kunci Seleksi",
+                        tint = if (isSelectionLocked) Color.White else Color(0xFFFF9800),
+                        modifier = Modifier.size(19.dp)
+                    )
+                }
+
                 EditIconButton(icon = Icons.Default.ArrowLeft, text = "◄", action = if (activeSelection) "SELECT_LEFT" else "ARROW_LEFT", onSpecialPress = onSpecialPress, colors = colors, height = rowHeight, cornerRadius = cornerRadius, weight = 1f, testTag = "edit_left")
 
                 // Selection Box Toggle Key
@@ -204,58 +238,13 @@ fun EditKeyboardView(
                         imageVector = Icons.Default.CropFree,
                         contentDescription = "Mode Seleksi",
                         tint = if (activeSelection) colors.textHighlight else colors.keyText,
-                        modifier = Modifier.size(22.dp)
+                        modifier = Modifier.size(21.dp)
                     )
                 }
 
-                EditIconButton(icon = Icons.Default.ArrowRight, text = "►", action = if (activeSelection) "SELECT_RIGHT" else "ARROW_RIGHT", onSpecialPress = onSpecialPress, colors = colors, height = rowHeight, cornerRadius = cornerRadius, weight = 1f, testTag = "edit_right")
-                EditIconButton(icon = Icons.AutoMirrored.Filled.Undo, text = "↶", action = "UNDO", onSpecialPress = onSpecialPress, colors = colors, height = rowHeight, cornerRadius = cornerRadius, weight = 1f, testTag = "edit_undo")
-            }
-
-            Spacer(modifier = Modifier.height(4.dp))
-
-            // Row 3: Page Up, Home, Down, End, Backspace
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                EditIconButton(icon = Icons.Default.VerticalAlignTop, text = "⇞", action = "PAGE_UP", onSpecialPress = onSpecialPress, colors = colors, height = rowHeight, cornerRadius = cornerRadius, weight = 1f, testTag = "edit_page_up")
-                EditIconButton(icon = Icons.Default.SkipPrevious, text = "|<", action = if (activeSelection) "SELECT_HOME" else "CURSOR_HOME", onSpecialPress = onSpecialPress, colors = colors, height = rowHeight, cornerRadius = cornerRadius, weight = 1f, testTag = "edit_home")
                 EditIconButton(icon = Icons.Default.ArrowDropDown, text = "▼", action = if (activeSelection) "SELECT_DOWN" else "ARROW_DOWN", onSpecialPress = onSpecialPress, colors = colors, height = rowHeight, cornerRadius = cornerRadius, weight = 1f, testTag = "edit_down")
-                EditIconButton(icon = Icons.Default.SkipNext, text = ">|", action = if (activeSelection) "SELECT_END" else "CURSOR_END", onSpecialPress = onSpecialPress, colors = colors, height = rowHeight, cornerRadius = cornerRadius, weight = 1f, testTag = "edit_end")
-                EditIconButton(icon = Icons.AutoMirrored.Filled.KeyboardBackspace, text = "⌫", action = "BACKSPACE", onSpecialPress = onSpecialPress, colors = colors, height = rowHeight, cornerRadius = cornerRadius, weight = 1f, isSpecial = true, testTag = "edit_backspace")
-            }
-
-            Spacer(modifier = Modifier.height(4.dp))
-
-            // Row 4: Lock, Line Up, Space, Line Down, Enter
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                // Lock Selection Key
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(rowHeight)
-                        .padding(horizontal = 1.5.dp)
-                        .clip(RoundedCornerShape(cornerRadius))
-                        .background(if (isSelectionLocked) Color(0xFFFF9800) else colors.keyBackground)
-                        .then(
-                            if (colors.keyBorderColor != Color.Transparent || isSelectionLocked)
-                                Modifier.border(0.8.dp, if (isSelectionLocked) Color(0xFFFF9800) else colors.keyBorderColor, RoundedCornerShape(cornerRadius))
-                            else Modifier
-                        )
-                        .clickable { isSelectionLocked = !isSelectionLocked }
-                        .testTag("edit_lock_toggle"),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = if (isSelectionLocked) Icons.Default.Lock else Icons.Default.LockOpen,
-                        contentDescription = "Kunci Seleksi",
-                        tint = if (isSelectionLocked) Color.White else Color(0xFFFF9800),
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-
-                EditIconButton(icon = Icons.Default.KeyboardArrowUp, text = "▲", action = if (activeSelection) "SELECT_UP" else "ARROW_UP", onSpecialPress = onSpecialPress, colors = colors, height = rowHeight, cornerRadius = cornerRadius, weight = 1f, testTag = "edit_move_up")
-                EditIconButton(text = "_", action = "SPACE", onSpecialPress = onSpecialPress, colors = colors, height = rowHeight, cornerRadius = cornerRadius, weight = 1f, testTag = "edit_space")
-                EditIconButton(icon = Icons.Default.KeyboardArrowDown, text = "▼", action = if (activeSelection) "SELECT_DOWN" else "ARROW_DOWN", onSpecialPress = onSpecialPress, colors = colors, height = rowHeight, cornerRadius = cornerRadius, weight = 1f, testTag = "edit_move_down")
-                EditIconButton(icon = Icons.AutoMirrored.Filled.KeyboardReturn, text = "↵", action = "ENTER", onSpecialPress = onSpecialPress, colors = colors, height = rowHeight, cornerRadius = cornerRadius, weight = 1f, isAction = true, testTag = "edit_enter")
+                EditIconButton(icon = Icons.Default.ArrowRight, text = "►", action = if (activeSelection) "SELECT_RIGHT" else "ARROW_RIGHT", onSpecialPress = onSpecialPress, colors = colors, height = rowHeight, cornerRadius = cornerRadius, weight = 1f, testTag = "edit_right")
+                EditIconButton(icon = Icons.Default.DeleteForever, text = "Del", action = "DEL", onSpecialPress = onSpecialPress, colors = colors, height = rowHeight, cornerRadius = cornerRadius, weight = 1f, isSpecial = true, testTag = "edit_del")
             }
         }
     }

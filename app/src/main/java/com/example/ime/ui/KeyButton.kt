@@ -25,12 +25,11 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Popup
-import androidx.compose.ui.window.PopupProperties
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.zIndex
 
 /**
  * Character alternative accents map for long-press popups.
@@ -143,55 +142,49 @@ fun KeyButton(
 
         // 1. Key Preview Magnification Bubble (Shows when key is pressed)
         if (enableKeyPreview && isPressed && !showAltPopup && text.length == 1) {
-            Popup(
-                alignment = Alignment.TopCenter,
-                offset = IntOffset(0, -115),
-                properties = PopupProperties(focusable = false)
+            Box(
+                modifier = Modifier
+                    .offset(y = (-58).dp)
+                    .zIndex(100f)
+                    .size(52.dp, 56.dp)
+                    .shadow(6.dp, RoundedCornerShape(10.dp))
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(backgroundColor)
+                    .border(1.dp, borderColor.copy(alpha = 0.6f), RoundedCornerShape(10.dp)),
+                contentAlignment = Alignment.Center
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(54.dp, 58.dp)
-                        .shadow(6.dp, RoundedCornerShape(10.dp))
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(backgroundColor)
-                        .border(1.dp, borderColor.copy(alpha = 0.6f), RoundedCornerShape(10.dp)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = text,
-                        color = textColor,
-                        fontSize = (fontSize.value * 1.5f).sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
+                Text(
+                    text = text,
+                    color = textColor,
+                    fontSize = (fontSize.value * 1.5f).sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
         }
 
         // 2. Alt Accents Characters Popup Strip on Long Press
         if (showAltPopup && altVariants.isNotEmpty()) {
-            Popup(
-                alignment = Alignment.TopCenter,
-                offset = IntOffset(0, -110),
-                onDismissRequest = { showAltPopup = false },
-                properties = PopupProperties(focusable = true)
+            Box(
+                modifier = Modifier
+                    .offset(y = (-52).dp)
+                    .zIndex(110f)
+                    .shadow(8.dp, RoundedCornerShape(10.dp))
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(backgroundColor)
+                    .border(1.dp, borderColor.copy(alpha = 0.8f), RoundedCornerShape(10.dp))
+                    .padding(horizontal = 4.dp, vertical = 4.dp)
             ) {
                 Row(
-                    modifier = Modifier
-                        .shadow(8.dp, RoundedCornerShape(10.dp))
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(backgroundColor)
-                        .border(1.dp, borderColor.copy(alpha = 0.8f), RoundedCornerShape(10.dp))
-                        .padding(horizontal = 4.dp, vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(3.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     // Include default letter
                     Box(
                         modifier = Modifier
-                            .size(36.dp, 44.dp)
+                            .size(36.dp, 42.dp)
                             .clip(RoundedCornerShape(6.dp))
                             .background(backgroundColor.copy(alpha = 0.8f))
-                            .combinedClickable {
+                            .clickable {
                                 onKeyClick(text)
                                 showAltPopup = false
                             },
@@ -208,10 +201,10 @@ fun KeyButton(
                     altVariants.forEach { alt ->
                         Box(
                             modifier = Modifier
-                                .size(36.dp, 44.dp)
+                                .size(36.dp, 42.dp)
                                 .clip(RoundedCornerShape(6.dp))
                                 .background(backgroundColor.copy(alpha = 0.4f))
-                                .combinedClickable {
+                                .clickable {
                                     onKeyClick(alt)
                                     showAltPopup = false
                                 },
