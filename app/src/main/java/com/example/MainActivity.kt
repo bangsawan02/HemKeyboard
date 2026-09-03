@@ -166,7 +166,12 @@ fun SettingsScreen(
         )
 
         // 6. System Typing Test Area Card
-        SystemTypingTestCard(isSelected = isSelected)
+        SystemTypingTestCard(
+            isSelected = isSelected,
+            activeTheme = activeTheme,
+            heightStyle = heightStyle,
+            shapeStyle = shapeStyle
+        )
 
         Spacer(modifier = Modifier.height(24.dp))
     }

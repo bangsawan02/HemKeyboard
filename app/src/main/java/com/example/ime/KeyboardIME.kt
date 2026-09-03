@@ -303,11 +303,25 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
 
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
-        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
+        if (lifecycleRegistry.currentState == Lifecycle.State.CREATED || lifecycleRegistry.currentState == Lifecycle.State.INITIALIZED) {
+            lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
+        }
+        if (lifecycleRegistry.currentState == Lifecycle.State.STARTED) {
+            lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
+        }
         updateActionLabel(info)
         checkAutoCapitalize()
         refreshClipboardPreview()
         reloadSettingsFromDb()
+    }
+
+    override fun onEvaluateInputViewShown(): Boolean {
+        // Ensure input view is made visible when input connection is attached
+        return super.onEvaluateInputViewShown()
+    }
+
+    override fun onShowInputRequested(flags: Int, configChange: Boolean): Boolean {
+        return super.onShowInputRequested(flags, configChange)
     }
 
     override fun onStartInput(attribute: EditorInfo?, restarting: Boolean) {
@@ -374,12 +388,22 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
         super.onFinishInputView(finishingInput)
         voiceInputHelper?.stopListening()
         inlineSuggestionViews = emptyList()
-        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
+        if (lifecycleRegistry.currentState == Lifecycle.State.RESUMED) {
+            lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
+        }
+        if (lifecycleRegistry.currentState == Lifecycle.State.STARTED) {
+            lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
+        }
     }
 
     override fun onWindowShown() {
         super.onWindowShown()
-        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
+        if (lifecycleRegistry.currentState == Lifecycle.State.CREATED || lifecycleRegistry.currentState == Lifecycle.State.INITIALIZED) {
+            lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
+        }
+        if (lifecycleRegistry.currentState == Lifecycle.State.STARTED) {
+            lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
+        }
         refreshClipboardPreview()
         reloadSettingsFromDb()
     }
@@ -387,7 +411,12 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
     override fun onWindowHidden() {
         super.onWindowHidden()
         voiceInputHelper?.stopListening()
-        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
+        if (lifecycleRegistry.currentState == Lifecycle.State.RESUMED) {
+            lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
+        }
+        if (lifecycleRegistry.currentState == Lifecycle.State.STARTED) {
+            lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
+        }
     }
 
     override fun onDestroy() {
@@ -440,19 +469,24 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
         val ic = currentInputConnection ?: return
         triggerFeedback(NativeAudioFeedback.SoundType.STANDARD, NativeHapticFeedback.HapticType.KEY_NORMAL)
 
-        if (char.isLetterOrDigit() || char == '\'') {
-            currentWord += char
-            ic.commitText(char.toString(), 1)
-            updateSuggestions()
-            spellCheckerHelper?.checkSpelling(currentWord)
-        } else {
-            if (currentWord.isNotEmpty()) {
-                predictionEngine.learnWord(currentWord, previousWord)
-                previousWord = currentWord.lowercase()
-                currentWord = ""
+        ic.beginBatchEdit()
+        try {
+            if (char.isLetterOrDigit() || char == '\'') {
+                currentWord += char
+                ic.commitText(char.toString(), 1)
+                updateSuggestions()
+                spellCheckerHelper?.checkSpelling(currentWord)
+            } else {
+                if (currentWord.isNotEmpty()) {
+                    predictionEngine.learnWord(currentWord, previousWord)
+                    previousWord = currentWord.lowercase()
+                    currentWord = ""
+                }
+                ic.commitText(char.toString(), 1)
+                updateSuggestions()
             }
-            ic.commitText(char.toString(), 1)
-            updateSuggestions()
+        } finally {
+            ic.endBatchEdit()
         }
         checkAutoCapitalize()
     }
@@ -486,14 +520,19 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
     private fun applyPrediction(word: String) {
         val ic = currentInputConnection ?: return
         triggerFeedback(NativeAudioFeedback.SoundType.STANDARD, NativeHapticFeedback.HapticType.KEY_NORMAL)
-        if (currentWord.isNotEmpty()) {
-            ic.deleteSurroundingText(currentWord.length, 0)
+        ic.beginBatchEdit()
+        try {
+            if (currentWord.isNotEmpty()) {
+                ic.deleteSurroundingText(currentWord.length, 0)
+            }
+            ic.commitText(word + " ", 1)
+            predictionEngine.learnWord(word, previousWord)
+            previousWord = word.lowercase()
+            currentWord = ""
+            updateSuggestions()
+        } finally {
+            ic.endBatchEdit()
         }
-        ic.commitText(word + " ", 1)
-        predictionEngine.learnWord(word, previousWord)
-        previousWord = word.lowercase()
-        currentWord = ""
-        updateSuggestions()
         checkAutoCapitalize()
     }
 
