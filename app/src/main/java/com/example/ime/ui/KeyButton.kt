@@ -1,29 +1,70 @@
 package com.example.ime.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
+
+/**
+ * Character alternative accents map for long-press popups.
+ */
+val AltCharactersMap = mapOf(
+    "a" to listOf("á", "à", "â", "ä", "ã", "å", "æ", "ā"),
+    "A" to listOf("Á", "À", "Â", "Ä", "Ã", "Å", "Æ", "Ā"),
+    "c" to listOf("ç", "ć", "č"),
+    "C" to listOf("Ç", "Ć", "Č"),
+    "e" to listOf("é", "è", "ê", "ë", "ē", "ė", "ę"),
+    "E" to listOf("É", "È", "Ê", "Ë", "Ē", "Ė", "Ę"),
+    "i" to listOf("í", "ì", "î", "ï", "ī", "į"),
+    "I" to listOf("Í", "Ì", "Î", "Ï", "Ī", "Į"),
+    "n" to listOf("ñ", "ń"),
+    "N" to listOf("Ñ", "Ń"),
+    "o" to listOf("ó", "ò", "ô", "ö", "õ", "ø", "ō", "œ"),
+    "O" to listOf("Ó", "Ò", "Ô", "Ö", "Õ", "Ø", "Ō", "Œ"),
+    "s" to listOf("ß", "ś", "š", "$"),
+    "S" to listOf("Ś", "Š", "$"),
+    "u" to listOf("ú", "ù", "û", "ü", "ū", "ų"),
+    "U" to listOf("Ú", "Ù", "Û", "Ü", "Ū", "Ų"),
+    "y" to listOf("ý", "ÿ"),
+    "Y" to listOf("Ý", "Ÿ"),
+    "z" to listOf("ź", "ż", "ž"),
+    "Z" to listOf("Ź", "Ż", "Ž"),
+    "0" to listOf("°", "⁰", "∅"),
+    "1" to listOf("¹", "½", "⅓", "¼"),
+    "2" to listOf("²", "⅔"),
+    "3" to listOf("³", "¾"),
+    "$" to listOf("€", "£", "¥", "Rp", "¢", "₹"),
+    "?" to listOf("¿", "‽"),
+    "!" to listOf("¡"),
+    "%" to listOf("‰")
+)
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -38,12 +79,16 @@ fun KeyButton(
     backgroundColor: Color,
     textColor: Color,
     hintText: String? = null,
-    onLongClick: ((String) -> Unit)? = null
+    onLongClick: ((String) -> Unit)? = null,
+    enableKeyPreview: Boolean = true
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
+    var showAltPopup by remember { mutableStateOf(false) }
 
-    val currentBg = if (isPressed) {
+    val altVariants = remember(text) { AltCharactersMap[text] ?: emptyList() }
+
+    val currentBg = if (isPressed || showAltPopup) {
         backgroundColor.copy(alpha = 0.65f)
     } else {
         backgroundColor
@@ -64,11 +109,15 @@ fun KeyButton(
                 interactionSource = interactionSource,
                 indication = null,
                 onClick = { onKeyClick(text) },
-                onLongClick = if (onLongClick != null) {
-                    { onLongClick(text) }
-                } else if (hintText != null) {
-                    { onKeyClick(hintText) }
-                } else null
+                onLongClick = {
+                    if (altVariants.isNotEmpty()) {
+                        showAltPopup = true
+                    } else if (onLongClick != null) {
+                        onLongClick(text)
+                    } else if (hintText != null) {
+                        onKeyClick(hintText)
+                    }
+                }
             )
             .testTag("key_$text"),
         contentAlignment = Alignment.Center
@@ -90,6 +139,94 @@ fun KeyButton(
                     .align(Alignment.TopEnd)
                     .padding(top = 2.dp, end = 3.dp)
             )
+        }
+
+        // 1. Key Preview Magnification Bubble (Shows when key is pressed)
+        if (enableKeyPreview && isPressed && !showAltPopup && text.length == 1) {
+            Popup(
+                alignment = Alignment.TopCenter,
+                offset = IntOffset(0, -115),
+                properties = PopupProperties(focusable = false)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(54.dp, 58.dp)
+                        .shadow(6.dp, RoundedCornerShape(10.dp))
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(backgroundColor)
+                        .border(1.dp, borderColor.copy(alpha = 0.6f), RoundedCornerShape(10.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = text,
+                        color = textColor,
+                        fontSize = (fontSize.value * 1.5f).sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+
+        // 2. Alt Accents Characters Popup Strip on Long Press
+        if (showAltPopup && altVariants.isNotEmpty()) {
+            Popup(
+                alignment = Alignment.TopCenter,
+                offset = IntOffset(0, -110),
+                onDismissRequest = { showAltPopup = false },
+                properties = PopupProperties(focusable = true)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .shadow(8.dp, RoundedCornerShape(10.dp))
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(backgroundColor)
+                        .border(1.dp, borderColor.copy(alpha = 0.8f), RoundedCornerShape(10.dp))
+                        .padding(horizontal = 4.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(3.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Include default letter
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp, 44.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(backgroundColor.copy(alpha = 0.8f))
+                            .combinedClickable {
+                                onKeyClick(text)
+                                showAltPopup = false
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = text,
+                            color = textColor,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    altVariants.forEach { alt ->
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp, 44.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(backgroundColor.copy(alpha = 0.4f))
+                                .combinedClickable {
+                                    onKeyClick(alt)
+                                    showAltPopup = false
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = alt,
+                                color = textColor,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }

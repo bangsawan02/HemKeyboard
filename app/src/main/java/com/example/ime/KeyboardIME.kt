@@ -5,16 +5,23 @@ import android.content.Context
 import android.inputmethodservice.InputMethodService
 import android.media.AudioManager
 import android.os.Build
-import android.os.VibrationEffect
-import android.os.Vibrator
-import android.os.VibratorManager
+import android.os.Bundle
+import android.util.Size
 import android.view.KeyEvent
 import android.view.View
+import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InlineSuggestionsRequest
+import android.view.inputmethod.InlineSuggestionsResponse
+import android.view.inputmethod.InputMethodManager
+import android.view.inputmethod.InputMethodSubtype
+import android.widget.inline.InlinePresentationSpec
+import androidx.annotation.RequiresApi
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.ComposeView
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.*
 import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
@@ -29,6 +36,13 @@ import com.example.database.WordEntity
 import com.example.ui.theme.KeyShapeStyle
 import com.example.ui.theme.KeyboardHeightStyle
 import com.example.ui.theme.KeyboardThemeStyle
+import com.example.util.NativeAudioFeedback
+import com.example.util.NativeClipboardHelper
+import com.example.util.NativeHapticFeedback
+import com.example.util.NativeInputMethodHelper
+import com.example.util.NativeSpellCheckerHelper
+import com.example.util.NativeUserDictionaryHelper
+import com.example.util.NativeVoiceInputHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -55,30 +69,183 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
     private var predictionEnabled by mutableStateOf(true)
     private var hapticEnabled by mutableStateOf(true)
     private var hapticDurationMs by mutableStateOf(30L)
-    private var codingBarEnabled by mutableStateOf(true)
-    private var cursorArrowsEnabled by mutableStateOf(true)
-    private var codeSnippetsEnabled by mutableStateOf(true)
-    private var tabUsesSpaces by mutableStateOf(true)
     private var autoCapitalizeNext by mutableStateOf(false)
+    private var actionLabel by mutableStateOf("Enter")
+    private var latestClipboardText by mutableStateOf<String?>(null)
+    private var isVoiceListening by mutableStateOf(false)
+    private var inlineSuggestionViews by mutableStateOf<List<View>>(emptyList())
 
     private var vowelOptionalEnabled by mutableStateOf(false)
     private var guessMissingLettersEnabled by mutableStateOf(false)
-    private var mistypeTolerance by mutableStateOf(20)
     private var nextWordPredictionEnabled by mutableStateOf(true)
     private var alwaysPredictEnabled by mutableStateOf(false)
     private var predictPasswordsEnabled by mutableStateOf(false)
-    private var showPasswordEnabled by mutableStateOf(false)
+    private var enableKeyPreview by mutableStateOf(true)
     
     private var lastSpacePressTime: Long = 0
     private var predictionJob: Job? = null
     private var wordsTypedSincePrune = 0
     private var previousWord: String? = null
 
+    // Native Android Helpers
+    private var spellCheckerHelper: NativeSpellCheckerHelper? = null
+    private var voiceInputHelper: NativeVoiceInputHelper? = null
+    private var clipboardListener: ClipboardManager.OnPrimaryClipChangedListener? = null
+
     override fun onCreate() {
         savedStateRegistryController.performRestore(null)
         super.onCreate()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
         database = DatabaseProvider.getDatabase(this)
+
+        // Initialize Native Spell Checker Helper
+        spellCheckerHelper = NativeSpellCheckerHelper(this) { _, suggestions ->
+            if (suggestions.isNotEmpty() && currentWord.isNotEmpty()) {
+                val merged = (predictionsList + suggestions).distinct().take(5)
+                predictionsList = merged
+            }
+        }.apply { initialize() }
+
+        // Initialize Native Voice Typing Helper
+        voiceInputHelper = NativeVoiceInputHelper(
+            context = this,
+            onTextRecognized = { text, isFinal ->
+                val ic = currentInputConnection
+                if (ic != null && text.isNotBlank()) {
+                    ic.commitText(if (isFinal) "$text " else text, 1)
+                    if (isFinal) {
+                        learnWord(text, previousWord)
+                        previousWord = text.lowercase()
+                        currentWord = ""
+                        updateSuggestions()
+                    }
+                }
+            },
+            onListeningStateChanged = { listening, _ ->
+                isVoiceListening = listening
+            }
+        )
+
+        // Initialize Native Clipboard primary clip listener
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+        clipboardListener = ClipboardManager.OnPrimaryClipChangedListener {
+            refreshClipboardPreview()
+        }
+        clipboardListener?.let { clipboard?.addPrimaryClipChangedListener(it) }
+        refreshClipboardPreview()
+    }
+
+    private fun refreshClipboardPreview() {
+        val clipText = NativeClipboardHelper.getPrimaryClipText(this)
+        if (!clipText.isNullOrBlank() && clipText.length in 1..80) {
+            latestClipboardText = clipText
+        } else {
+            latestClipboardText = null
+        }
+    }
+
+    override fun onEvaluateFullscreenMode(): Boolean {
+        // Modern keyboards should not take up the entire screen in landscape mode
+        return false
+    }
+
+    override fun onComputeInsets(outInsets: Insets?) {
+        super.onComputeInsets(outInsets)
+        if (outInsets == null) return
+        val decorView = window?.window?.decorView ?: return
+        val visibleTop = decorView.height
+        outInsets.contentTopInsets = visibleTop
+        outInsets.visibleTopInsets = visibleTop
+        outInsets.touchableInsets = Insets.TOUCHABLE_INSETS_CONTENT
+        outInsets.touchableRegion.set(0, 0, decorView.width, decorView.height)
+    }
+
+    // --- Android 11+ (API 30+) Autofill Inline Suggestions (Passwords / OTP / Credentials) ---
+    override fun onCreateInlineSuggestionsRequest(uiExtras: Bundle): InlineSuggestionsRequest? {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val stylesBundle = Bundle()
+            val inlinePresentationSpec = InlinePresentationSpec.Builder(
+                Size(100, 36),
+                Size(700, 100)
+            ).setStyle(stylesBundle).build()
+
+            return InlineSuggestionsRequest.Builder(listOf(inlinePresentationSpec))
+                .setMaxSuggestionCount(6)
+                .build()
+        }
+        return null
+    }
+
+    override fun onInlineSuggestionsResponse(response: InlineSuggestionsResponse): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val suggestions = response.inlineSuggestions
+            if (suggestions.isEmpty()) {
+                inlineSuggestionViews = emptyList()
+                return false
+            }
+
+            val context = this
+            val views = mutableListOf<View>()
+            val executor = ContextCompat.getMainExecutor(context)
+            var pendingCount = suggestions.size
+
+            for (suggestion in suggestions) {
+                suggestion.inflate(context, Size(ViewGroup.LayoutParams.WRAP_CONTENT, 80), executor) { view ->
+                    if (view != null) {
+                        views.add(view)
+                    }
+                    pendingCount--
+                    if (pendingCount == 0) {
+                        inlineSuggestionViews = views.toList()
+                    }
+                }
+            }
+            return true
+        }
+        return false
+    }
+
+    // --- Hardware / Bluetooth Keyboard Interception (onKeyDown & onKeyUp) ---
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (event != null && event.isCtrlPressed) {
+            when (keyCode) {
+                KeyEvent.KEYCODE_C -> {
+                    handleSpecialPress("COPY")
+                    return true
+                }
+                KeyEvent.KEYCODE_V -> {
+                    handleSpecialPress("PASTE")
+                    return true
+                }
+                KeyEvent.KEYCODE_X -> {
+                    handleSpecialPress("CUT")
+                    return true
+                }
+                KeyEvent.KEYCODE_A -> {
+                    handleSpecialPress("SELECT_ALL")
+                    return true
+                }
+                KeyEvent.KEYCODE_Z -> {
+                    if (event.isShiftPressed) handleSpecialPress("REDO") else handleSpecialPress("UNDO")
+                    return true
+                }
+                KeyEvent.KEYCODE_Y -> {
+                    handleSpecialPress("REDO")
+                    return true
+                }
+            }
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent?): Boolean {
+        return super.onKeyUp(keyCode, event)
+    }
+
+    override fun onCurrentInputMethodSubtypeChanged(newSubtype: InputMethodSubtype?) {
+        super.onCurrentInputMethodSubtypeChanged(newSubtype)
+        // Subtype changed dynamically
+        triggerFeedback(NativeAudioFeedback.SoundType.STANDARD, NativeHapticFeedback.HapticType.KEY_DOUBLE_PULSE)
     }
 
     override fun onCreateInputView(): View {
@@ -105,11 +272,18 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
                     activeTheme = activeTheme,
                     heightStyle = heightStyle,
                     shapeStyle = shapeStyle,
-                    codingBarEnabled = codingBarEnabled,
-                    cursorArrowsEnabled = cursorArrowsEnabled,
-                    codeSnippetsEnabled = codeSnippetsEnabled,
                     autoCapitalizeNext = autoCapitalizeNext,
-                    currentWord = currentWord
+                    currentWord = currentWord,
+                    actionLabel = actionLabel,
+                    clipboardText = latestClipboardText,
+                    isVoiceListening = isVoiceListening,
+                    onVoiceClick = { toggleVoiceTyping() },
+                    inlineSuggestionViews = inlineSuggestionViews,
+                    onSwitchIme = {
+                        val token = window?.window?.attributes?.token
+                        NativeInputMethodHelper.switchToNextInputMethod(this@KeyboardIME, token)
+                    },
+                    enableKeyPreview = enableKeyPreview
                 )
             }
         }
@@ -134,13 +308,17 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
+        updateActionLabel(info)
         checkAutoCapitalize()
+        refreshClipboardPreview()
     }
 
     override fun onStartInput(attribute: EditorInfo?, restarting: Boolean) {
         super.onStartInput(attribute, restarting)
         currentWord = ""
         predictionsList = emptyList()
+        inlineSuggestionViews = emptyList()
+        updateActionLabel(attribute)
 
         lifecycleScope.launch(Dispatchers.IO) {
             val themeVal = database.settingDao().getSetting("keyboard_theme") ?: KeyboardThemeStyle.LIGHT.name
@@ -150,17 +328,12 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
             val predictionVal = database.settingDao().getSetting("prediction_enabled") ?: "true"
             val hapticVal = database.settingDao().getSetting("haptic_enabled") ?: "true"
             val hapticDurationVal = database.settingDao().getSetting("haptic_duration_ms") ?: "30"
-            val codingBarVal = database.settingDao().getSetting("coding_bar_enabled") ?: "true"
-            val cursorArrowsVal = database.settingDao().getSetting("cursor_arrows_enabled") ?: "true"
-            val codeSnippetsVal = database.settingDao().getSetting("code_snippets_enabled") ?: "true"
-            val tabSpacesVal = database.settingDao().getSetting("tab_uses_spaces") ?: "true"
             val vowelOptionalVal = database.settingDao().getSetting("vowel_optional_enabled") ?: "false"
             val guessMissingVal = database.settingDao().getSetting("guess_missing_letters_enabled") ?: "false"
-            val mistypeToleranceVal = database.settingDao().getSetting("mistype_tolerance") ?: "20"
             val nextWordVal = database.settingDao().getSetting("next_word_enabled") ?: "true"
             val alwaysPredictVal = database.settingDao().getSetting("always_predict_enabled") ?: "false"
             val predictPassVal = database.settingDao().getSetting("predict_passwords_enabled") ?: "false"
-            val showPassVal = database.settingDao().getSetting("show_password_enabled") ?: "false"
+            val keyPreviewVal = database.settingDao().getSetting("key_preview_enabled") ?: "true"
 
             withContext(Dispatchers.Main) {
                 activeTheme = try {
@@ -182,34 +355,49 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
                 predictionEnabled = predictionVal.toBoolean()
                 hapticEnabled = hapticVal.toBoolean()
                 hapticDurationMs = hapticDurationVal.toLongOrNull() ?: 30L
-                codingBarEnabled = codingBarVal.toBoolean()
-                cursorArrowsEnabled = cursorArrowsVal.toBoolean()
-                codeSnippetsEnabled = codeSnippetsVal.toBoolean()
-                tabUsesSpaces = tabSpacesVal.toBoolean()
                 vowelOptionalEnabled = vowelOptionalVal.toBoolean()
                 guessMissingLettersEnabled = guessMissingVal.toBoolean()
-                mistypeTolerance = mistypeToleranceVal.toIntOrNull() ?: 20
                 nextWordPredictionEnabled = nextWordVal.toBoolean()
                 alwaysPredictEnabled = alwaysPredictVal.toBoolean()
                 predictPasswordsEnabled = predictPassVal.toBoolean()
-                showPasswordEnabled = showPassVal.toBoolean()
+                enableKeyPreview = keyPreviewVal.toBoolean()
                 updateSuggestions()
             }
         }
     }
 
+    private fun updateActionLabel(info: EditorInfo?) {
+        if (info == null) {
+            actionLabel = "Enter"
+            return
+        }
+        val action = info.imeOptions and (EditorInfo.IME_MASK_ACTION or EditorInfo.IME_FLAG_NO_ENTER_ACTION)
+        actionLabel = when (action) {
+            EditorInfo.IME_ACTION_GO -> "Go"
+            EditorInfo.IME_ACTION_SEARCH -> "Cari"
+            EditorInfo.IME_ACTION_SEND -> "Kirim"
+            EditorInfo.IME_ACTION_NEXT -> "Lanjut"
+            EditorInfo.IME_ACTION_DONE -> "Selesai"
+            else -> "Enter"
+        }
+    }
+
     override fun onFinishInputView(finishingInput: Boolean) {
         super.onFinishInputView(finishingInput)
+        voiceInputHelper?.stopListening()
+        inlineSuggestionViews = emptyList()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
     }
 
     override fun onWindowShown() {
         super.onWindowShown()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
+        refreshClipboardPreview()
     }
 
     override fun onWindowHidden() {
         super.onWindowHidden()
+        voiceInputHelper?.stopListening()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
     }
 
@@ -217,6 +405,13 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
         store.clear()
         predictionJob?.cancel()
+        voiceInputHelper?.stopListening()
+        spellCheckerHelper?.close()
+        
+        clipboardListener?.let {
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            clipboard?.removePrimaryClipChangedListener(it)
+        }
         super.onDestroy()
     }
 
@@ -245,14 +440,23 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
                              textBefore.endsWith("\n")
     }
 
+    private fun toggleVoiceTyping() {
+        if (isVoiceListening) {
+            voiceInputHelper?.stopListening()
+        } else {
+            voiceInputHelper?.startListening()
+        }
+    }
+
     private fun handleKeyPress(char: Char) {
         val ic = currentInputConnection ?: return
-        triggerFeedback()
+        triggerFeedback(NativeAudioFeedback.SoundType.STANDARD, NativeHapticFeedback.HapticType.KEY_NORMAL)
 
         if (char.isLetterOrDigit() || char == '\'') {
             currentWord += char
             ic.commitText(char.toString(), 1)
             updateSuggestions()
+            spellCheckerHelper?.checkSpelling(currentWord)
         } else {
             if (currentWord.isNotEmpty()) {
                 learnWord(currentWord, previousWord)
@@ -267,10 +471,10 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
 
     private fun handleSpecialPress(action: String) {
         val ic = currentInputConnection ?: return
-        triggerFeedback()
 
         when {
             action == "BACKSPACE" -> {
+                triggerFeedback(NativeAudioFeedback.SoundType.DELETE, NativeHapticFeedback.HapticType.KEY_ACTION_HEAVY)
                 if (currentWord.isNotEmpty()) {
                     currentWord = currentWord.substring(0, currentWord.length - 1)
                     ic.deleteSurroundingText(1, 0)
@@ -281,13 +485,14 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
                 }
             }
             action == "SPACE" -> {
+                triggerFeedback(NativeAudioFeedback.SoundType.SPACEBAR, NativeHapticFeedback.HapticType.KEY_SPACE_SYMBOL)
                 val now = System.currentTimeMillis()
                 if (now - lastSpacePressTime < 300) {
                     // Double tap space: convert last space to period
                     ic.deleteSurroundingText(1, 0)
                     ic.commitText(". ", 1)
                     previousWord = "."
-                    lastSpacePressTime = 0 // Reset to prevent triple-tap dots
+                    lastSpacePressTime = 0
                     updateSuggestions()
                 } else {
                     if (currentWord.isNotEmpty()) {
@@ -313,34 +518,42 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
                     updateSuggestions()
                 }
             }
-            action == "CURSOR_LEFT" -> {
-                ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_LEFT))
-                ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_LEFT))
-            }
-            action == "CURSOR_RIGHT" -> {
-                ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_RIGHT))
-                ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_RIGHT))
-            }
             action == "ENTER" -> {
+                triggerFeedback(NativeAudioFeedback.SoundType.RETURN, NativeHapticFeedback.HapticType.KEY_ACTION_HEAVY)
                 if (currentWord.isNotEmpty()) {
                     learnWord(currentWord, previousWord)
                     previousWord = currentWord.lowercase()
                     currentWord = ""
                 } else {
-                    previousWord = null // Reset context on newline
+                    previousWord = null
                 }
                 predictionsList = emptyList()
-                ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER))
-                ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER))
-            }
-            action == "TAB" -> {
-                if (tabUsesSpaces) {
-                    ic.commitText("    ", 1)
+
+                val info = currentInputEditorInfo
+                if (info != null && (info.imeOptions and EditorInfo.IME_MASK_ACTION) != EditorInfo.IME_ACTION_NONE &&
+                    (info.imeOptions and EditorInfo.IME_FLAG_NO_ENTER_ACTION) == 0) {
+                    val performed = ic.performEditorAction(info.imeOptions and EditorInfo.IME_MASK_ACTION)
+                    if (!performed) {
+                        ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER))
+                        ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER))
+                    }
                 } else {
-                    ic.commitText("\t", 1)
+                    ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER))
+                    ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER))
                 }
             }
+            action == "CURSOR_LEFT" -> {
+                triggerFeedback(NativeAudioFeedback.SoundType.STANDARD, NativeHapticFeedback.HapticType.KEY_NORMAL)
+                ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_LEFT))
+                ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_LEFT))
+            }
+            action == "CURSOR_RIGHT" -> {
+                triggerFeedback(NativeAudioFeedback.SoundType.STANDARD, NativeHapticFeedback.HapticType.KEY_NORMAL)
+                ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_RIGHT))
+                ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_RIGHT))
+            }
             action == "SELECT_ALL" -> {
+                triggerFeedback(NativeAudioFeedback.SoundType.STANDARD, NativeHapticFeedback.HapticType.KEY_SPACE_SYMBOL)
                 val handled = ic.performContextMenuAction(android.R.id.selectAll)
                 if (!handled) {
                     ic.sendKeyEvent(KeyEvent(0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_A, 0, KeyEvent.META_CTRL_ON))
@@ -348,23 +561,28 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
                 }
             }
             action == "COPY" -> {
+                triggerFeedback(NativeAudioFeedback.SoundType.STANDARD, NativeHapticFeedback.HapticType.KEY_SPACE_SYMBOL)
                 val handled = ic.performContextMenuAction(android.R.id.copy)
                 if (!handled) {
                     ic.sendKeyEvent(KeyEvent(0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_C, 0, KeyEvent.META_CTRL_ON))
                     ic.sendKeyEvent(KeyEvent(0, 0, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_C, 0, KeyEvent.META_CTRL_ON))
                 }
+                refreshClipboardPreview()
             }
             action == "CUT" -> {
+                triggerFeedback(NativeAudioFeedback.SoundType.STANDARD, NativeHapticFeedback.HapticType.KEY_SPACE_SYMBOL)
                 val handled = ic.performContextMenuAction(android.R.id.cut)
                 if (!handled) {
                     ic.sendKeyEvent(KeyEvent(0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_X, 0, KeyEvent.META_CTRL_ON))
                     ic.sendKeyEvent(KeyEvent(0, 0, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_X, 0, KeyEvent.META_CTRL_ON))
                 }
+                refreshClipboardPreview()
             }
             action == "PASTE" -> {
+                triggerFeedback(NativeAudioFeedback.SoundType.STANDARD, NativeHapticFeedback.HapticType.KEY_SPACE_SYMBOL)
                 val handled = ic.performContextMenuAction(android.R.id.paste)
                 if (!handled) {
-                    val clip = com.example.util.NativeClipboardHelper.getPrimaryClipText(this)
+                    val clip = NativeClipboardHelper.getPrimaryClipText(this)
                     if (!clip.isNullOrEmpty()) {
                         ic.commitText(clip, 1)
                     } else {
@@ -374,6 +592,7 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
                 }
             }
             action == "UNDO" -> {
+                triggerFeedback(NativeAudioFeedback.SoundType.STANDARD, NativeHapticFeedback.HapticType.KEY_SPACE_SYMBOL)
                 val handled = ic.performContextMenuAction(android.R.id.undo)
                 if (!handled) {
                     ic.sendKeyEvent(KeyEvent(0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_Z, 0, KeyEvent.META_CTRL_ON))
@@ -381,6 +600,7 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
                 }
             }
             action == "REDO" -> {
+                triggerFeedback(NativeAudioFeedback.SoundType.STANDARD, NativeHapticFeedback.HapticType.KEY_SPACE_SYMBOL)
                 val handled = ic.performContextMenuAction(android.R.id.redo)
                 if (!handled) {
                     ic.sendKeyEvent(KeyEvent(0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_Z, 0, KeyEvent.META_CTRL_ON or KeyEvent.META_SHIFT_ON))
@@ -390,107 +610,46 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
                 }
             }
             action == "ARROW_LEFT" -> {
+                triggerFeedback(NativeAudioFeedback.SoundType.STANDARD, NativeHapticFeedback.HapticType.KEY_NORMAL)
                 ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_LEFT))
                 ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_LEFT))
             }
             action == "ARROW_RIGHT" -> {
+                triggerFeedback(NativeAudioFeedback.SoundType.STANDARD, NativeHapticFeedback.HapticType.KEY_NORMAL)
                 ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_RIGHT))
                 ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_RIGHT))
             }
             action == "ARROW_UP" -> {
+                triggerFeedback(NativeAudioFeedback.SoundType.STANDARD, NativeHapticFeedback.HapticType.KEY_NORMAL)
                 ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_UP))
                 ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_UP))
             }
             action == "ARROW_DOWN" -> {
+                triggerFeedback(NativeAudioFeedback.SoundType.STANDARD, NativeHapticFeedback.HapticType.KEY_NORMAL)
                 ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_DOWN))
                 ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_DOWN))
             }
-            action == "CURSOR_HOME" -> {
-                ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MOVE_HOME))
-                ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MOVE_HOME))
-            }
-            action == "CURSOR_END" -> {
-                ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MOVE_END))
-                ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MOVE_END))
-            }
-            action == "PAGE_UP" -> {
-                ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_PAGE_UP))
-                ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_PAGE_UP))
-            }
-            action == "PAGE_DOWN" -> {
-                ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_PAGE_DOWN))
-                ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_PAGE_DOWN))
-            }
-            action == "SELECT_LEFT" -> {
-                ic.sendKeyEvent(KeyEvent(0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, 0, KeyEvent.META_SHIFT_ON))
-                ic.sendKeyEvent(KeyEvent(0, 0, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_LEFT, 0, KeyEvent.META_SHIFT_ON))
-            }
-            action == "SELECT_RIGHT" -> {
-                ic.sendKeyEvent(KeyEvent(0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_RIGHT, 0, KeyEvent.META_SHIFT_ON))
-                ic.sendKeyEvent(KeyEvent(0, 0, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_RIGHT, 0, KeyEvent.META_SHIFT_ON))
-            }
-            action == "SELECT_UP" -> {
-                ic.sendKeyEvent(KeyEvent(0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_UP, 0, KeyEvent.META_SHIFT_ON))
-                ic.sendKeyEvent(KeyEvent(0, 0, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_UP, 0, KeyEvent.META_SHIFT_ON))
-            }
-            action == "SELECT_DOWN" -> {
-                ic.sendKeyEvent(KeyEvent(0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_DOWN, 0, KeyEvent.META_SHIFT_ON))
-                ic.sendKeyEvent(KeyEvent(0, 0, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_DOWN, 0, KeyEvent.META_SHIFT_ON))
-            }
-            action == "SELECT_HOME" -> {
-                ic.sendKeyEvent(KeyEvent(0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MOVE_HOME, 0, KeyEvent.META_SHIFT_ON))
-                ic.sendKeyEvent(KeyEvent(0, 0, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MOVE_HOME, 0, KeyEvent.META_SHIFT_ON))
-            }
-            action == "SELECT_END" -> {
-                ic.sendKeyEvent(KeyEvent(0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MOVE_END, 0, KeyEvent.META_SHIFT_ON))
-                ic.sendKeyEvent(KeyEvent(0, 0, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MOVE_END, 0, KeyEvent.META_SHIFT_ON))
-            }
             action == "DELETE_WORD" -> {
-                ic.sendKeyEvent(KeyEvent(0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL, 0, KeyEvent.META_CTRL_ON))
-                ic.sendKeyEvent(KeyEvent(0, 0, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL, 0, KeyEvent.META_CTRL_ON))
-            }
-            action == "DELETE_LINE" -> {
-                ic.sendKeyEvent(KeyEvent(0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MOVE_HOME, 0, KeyEvent.META_SHIFT_ON))
-                ic.sendKeyEvent(KeyEvent(0, 0, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MOVE_HOME, 0, KeyEvent.META_SHIFT_ON))
-                ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL))
-                ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL))
+                triggerFeedback(NativeAudioFeedback.SoundType.DELETE, NativeHapticFeedback.HapticType.KEY_ACTION_HEAVY)
+                if (currentWord.isNotEmpty()) {
+                    ic.deleteSurroundingText(currentWord.length, 0)
+                    currentWord = ""
+                    updateSuggestions()
+                } else {
+                    ic.sendKeyEvent(KeyEvent(0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL, 0, KeyEvent.META_CTRL_ON))
+                    ic.sendKeyEvent(KeyEvent(0, 0, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL, 0, KeyEvent.META_CTRL_ON))
+                }
             }
             action == "HIDE_KEYBOARD" -> {
                 requestHideSelf(0)
             }
-            action == "CLIPBOARD" -> {
-                ic.performContextMenuAction(android.R.id.paste)
-            }
-            action == "ESC" -> {
-                ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ESCAPE))
-                ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ESCAPE))
-            }
-            action == "DEL" -> {
-                ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_FORWARD_DEL))
-                ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_FORWARD_DEL))
-            }
-            action.startsWith("F") && action.length in 2..3 && action.substring(1).all { it.isDigit() } -> {
-                val fNum = action.substring(1).toIntOrNull() ?: 0
-                if (fNum in 1..12) {
-                    val keyCode = KeyEvent.KEYCODE_F1 + (fNum - 1)
-                    ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, keyCode))
-                    ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, keyCode))
-                }
-            }
-            action.startsWith("PAIR:") -> {
-                val pair = action.removePrefix("PAIR:")
-                ic.commitText(pair, 1)
-                // Move cursor back inside the pair
-                ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_LEFT))
-                ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_LEFT))
-            }
             action.startsWith("COMMIT:") -> {
+                triggerFeedback(NativeAudioFeedback.SoundType.STANDARD, NativeHapticFeedback.HapticType.KEY_NORMAL)
                 val text = action.removePrefix("COMMIT:")
                 ic.commitText(text, 1)
-                if (text.endsWith("()") || text.endsWith("{}") || text.endsWith("[]")) {
-                    ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_LEFT))
-                    ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_LEFT))
-                }
+            }
+            else -> {
+                triggerFeedback(NativeAudioFeedback.SoundType.STANDARD, NativeHapticFeedback.HapticType.KEY_NORMAL)
             }
         }
         checkAutoCapitalize()
@@ -498,7 +657,7 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
 
     private fun applyPrediction(word: String) {
         val ic = currentInputConnection ?: return
-        triggerFeedback()
+        triggerFeedback(NativeAudioFeedback.SoundType.STANDARD, NativeHapticFeedback.HapticType.KEY_NORMAL)
         if (currentWord.isNotEmpty()) {
             ic.deleteSurroundingText(currentWord.length, 0)
         }
@@ -513,8 +672,6 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
     private fun updateSuggestions() {
         predictionJob?.cancel()
         
-        // Check for password field or "no prediction" flag
-        val ic = currentInputConnection
         val editorInfo = currentInputEditorInfo
         val isPasswordField = editorInfo?.let { 
             val variation = it.inputType and EditorInfo.TYPE_MASK_VARIATION
@@ -537,19 +694,24 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
         val currentPreviousWord = previousWord
 
         predictionJob = lifecycleScope.launch(Dispatchers.IO) {
-            delay(50)
+            delay(40)
             
             var dbPredictions = if (prefix.isNotEmpty()) {
-                // 1. Regular Prefix Match
                 database.wordDao().getPredictions(prefix, 10).toMutableList()
             } else if (currentPreviousWord != null && nextWordPredictionEnabled) {
-                // 2. Next word prediction based on previous word
                 database.wordDao().getNextWordPredictions(currentPreviousWord, 5).toMutableList()
             } else {
                 mutableListOf()
             }
 
-            // 3. Vowel Optional Logic
+            // Include system UserDictionary.Words words via ContentResolver
+            if (prefix.isNotEmpty() && dbPredictions.size < 5) {
+                val systemUserWords = NativeUserDictionaryHelper.getSystemUserWords(this@KeyboardIME)
+                val matchedSystemWords = systemUserWords.filter { it.word.lowercase().startsWith(prefix) }
+                    .map { it.word }
+                dbPredictions.addAll(matchedSystemWords)
+            }
+
             if (prefix.isNotEmpty() && dbPredictions.size < 3 && vowelOptionalEnabled) {
                 val prefixNoVowels = prefix.filter { it !in "aeiou" }
                 if (prefixNoVowels.isNotEmpty()) {
@@ -563,7 +725,6 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
                 }
             }
 
-            // 4. Guess Missing Letters / Fuzzy Matching (Simple version with tolerance)
             if (prefix.length >= 2 && dbPredictions.size < 3 && guessMissingLettersEnabled) {
                 val fuzzyPattern = "%" + prefix.toList().joinToString("%") + "%"
                 val fuzzyMatches = database.wordDao().getFuzzyPredictions(fuzzyPattern, 10).filter { word ->
@@ -578,7 +739,6 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
             }
 
             val finalPredictions = dbPredictions.distinct().take(5)
-
             val isFirstUpper = currentWord.isNotEmpty() && currentWord[0].isUpperCase() || (currentWord.isEmpty() && autoCapitalizeNext)
             val isAllUpper = currentWord.length > 1 && currentWord.all { it.isUpperCase() }
 
@@ -597,7 +757,6 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
 
     private fun learnWord(word: String, prevWord: String? = null) {
         val cleanWord = word.trim()
-        // Don't learn very short words or garbage
         if (cleanWord.length < 2 || cleanWord.any { !it.isLetterOrDigit() && it != '-' && it != '\'' }) return
 
         val isNameOrCustom = cleanWord[0].isUpperCase()
@@ -606,7 +765,6 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
         lifecycleScope.launch(Dispatchers.IO) {
             val lowerWord = cleanWord.lowercase()
             
-            // 1. Learn/Update the word itself
             val existing = database.wordDao().getWord(lowerWord)
             if (existing != null) {
                 database.wordDao().incrementFrequency(lowerWord)
@@ -619,9 +777,12 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
                         timestamp = System.currentTimeMillis()
                     )
                 )
+                // Also write to Android native system UserDictionary
+                if (isNameOrCustom) {
+                    NativeUserDictionaryHelper.addWordToSystemDictionary(this@KeyboardIME, cleanWord)
+                }
             }
 
-            // 2. Learn/Update the Bigram (Previous -> Current)
             if (prevWord != null) {
                 val existingBigram = database.wordDao().getBigram(prevWord, lowerWord)
                 if (existingBigram != null) {
@@ -638,10 +799,8 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
                 }
             }
 
-            // Periodic pruning
             if (wordsTypedSincePrune >= 50) {
                 database.wordDao().pruneDictionary(5000)
-                // Also prune old bigrams (e.g., older than 30 days)
                 val thirtyDaysAgo = System.currentTimeMillis() - (30L * 24 * 60 * 60 * 1000)
                 database.wordDao().pruneBigrams(thirtyDaysAgo)
                 wordsTypedSincePrune = 0
@@ -649,11 +808,13 @@ class KeyboardIME : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, S
         }
     }
 
-
-    private fun triggerFeedback() {
-        com.example.util.NativeAudioFeedback.playKeyPressSound(this)
+    private fun triggerFeedback(
+        soundType: NativeAudioFeedback.SoundType = NativeAudioFeedback.SoundType.STANDARD,
+        hapticType: NativeHapticFeedback.HapticType = NativeHapticFeedback.HapticType.KEY_NORMAL
+    ) {
+        NativeAudioFeedback.playKeyPressSound(this, soundType)
         if (hapticEnabled) {
-            com.example.util.NativeHapticFeedback.performHapticFeedback(this, hapticDurationMs)
+            NativeHapticFeedback.performHapticFeedback(this, hapticDurationMs, hapticType)
         }
     }
 }

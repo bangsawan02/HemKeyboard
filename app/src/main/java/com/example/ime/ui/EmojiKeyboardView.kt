@@ -21,8 +21,18 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ime.EmojiCategory
 import com.example.ui.theme.KeyboardColors
+import com.example.util.NativeEmojiHelper
+
+enum class EmojiCategory(val title: String, val icon: String) {
+    SMILEYS("Emosi", "😀"),
+    GESTURES("Tangan", "👍"),
+    HEARTS("Hati", "❤️"),
+    STAR("Populer", "⭐"),
+    ANIMALS("Alam", "🐶"),
+    FOOD("Kuliner", "🍔"),
+    OBJECTS("Benda", "⚽")
+}
 
 @Composable
 fun EmojiKeyboardView(
@@ -33,7 +43,7 @@ fun EmojiKeyboardView(
 ) {
     var selectedEmojiCategory by remember { mutableStateOf(EmojiCategory.SMILEYS) }
 
-    val emojiSmileys = remember {
+    val rawSmileys = remember {
         listOf(
             "😀", "😃", "😄", "😁", "😆", "😅", "😂", "🤣", "😊", "😇",
             "🙂", "🙃", "😉", "😌", "😍", "🥰", "😘", "😗", "😙", "😚",
@@ -48,7 +58,7 @@ fun EmojiKeyboardView(
         )
     }
 
-    val emojiGestures = remember {
+    val rawGestures = remember {
         listOf(
             "👋", "🤚", "🖐️", "✋", "🖖", "👌", "🤌", "🤏", "✌️", "🤞",
             "🫰", "🤟", "🤘", "🤙", "👈", "👉", "👆", "🖕", "👇", "☝️",
@@ -60,64 +70,59 @@ fun EmojiKeyboardView(
         )
     }
 
-    val emojiStars = remember {
+    val rawStars = remember {
         listOf(
             "⭐", "🌟", "✨", "💫", "🔥", "💯", "🎉", "🎊", "🚀", "💡",
             "❤️", "👍", "👏", "🙌", "😊", "🥳", "😎", "🤩", "🎯", "🏆",
-            "⚡", "☀️", "🌈", "🍀", "🍀", "🎁", "🎈", "📱", "🌐", "📌",
-            "📍", "🏷️", "📦", "📫", "📬", "📧", "📨", "✉️", "🌐", "🔮"
+            "⚡", "☀️", "🌈", "🍀", "🎁", "🎈", "📱", "🌐", "📌", "📍"
         )
     }
 
-    val emojiHearts = remember {
+    val rawHearts = remember {
         listOf(
             "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "🤍", "🤎", "💔",
             "❤️‍🔥", "❤️‍🩹", "❣️", "💕", "💞", "💓", "💗", "💖", "💘", "💝",
             "💟", "✨", "⭐️", "🌟", "💫", "⚡️", "☄️", "💥", "🔥", "💯",
-            "💢", "♨️", "✅", "☑️", "✔️", "❌", "⭕", "🛑", "⛔", "📛",
-            "🚫", "❓", "❔", "❕", "❗", "‼️", "⁉️", "➕", "➖", "➗",
-            "🟰", "⬆️", "↗️", "➡️", "↘️", "⬇️", "↙️", "⬅️", "↖️", "🔄"
+            "💢", "♨️", "✅", "☑️", "✔️", "❌", "⭕", "🛑", "⛔", "📛"
         )
     }
 
-    val emojiAnimals = remember {
+    val rawAnimals = remember {
         listOf(
             "🐶", "🐱", "🐭", "🐹", "🐰", "🦊", "🐻", "🐼", "🐻‍❄️", "🐨",
             "🐯", "🦁", "🐮", "🐷", "🐸", "🐵", "🐔", "🐧", "🐦", "🐤",
             "🦆", "🦅", "🦉", "🦇", "🐺", "🐗", "🐴", "🦄", "🐝", "🐛",
-            "🦋", "🐌", "🐞", "🐜", "🕷️", "🦂", "🐢", "🐍", "🦎", "🐙",
-            "🦑", "🦐", "🦞", "🦀", "🐡", "🐠", "🐟", "🐬", "🐳", "🦈",
-            "🐊", "🐅", "🐆", "🦓", "🦍", "🦧", "🐘", "🦛", "🦏", "🐪",
-            "🐫", "🦒", "🦘", "🌱", "🌿", "☘️", "🍀", "🎍", "🪴", "🎋",
-            "🍃", "🍂", "🍁", "🍄", "🌾", "💐", "🌷", "🌹", "🥀", "🌺",
-            "🌸", "🌼", "🌻", "🌞", "🌝", "⭐️", "🌟", "🌙", "🌍", "🌈"
+            "🦋", "🐌", "🐞", "🐜", "🕷️", "🦂", "🐢", "🐍", "🦎", "🐙"
         )
     }
 
-    val emojiFood = remember {
+    val rawFood = remember {
         listOf(
             "🍏", "🍎", "🍐", "🍊", "🍋", "🍌", "🍉", "🍇", "🍓", "🫐",
             "🍈", "🍒", "🍑", "🥭", "🍍", "🥥", "🥝", "🍅", "🍆", "🥑",
             "🥦", "🥬", "🥒", "🌶️", "🌽", "🥕", "🧄", "🧅", "🥔", "🍠",
             "🥐", "🥯", "🍞", "🥖", "🥨", "🧀", "🥚", "🍳", "🧈", "🥞",
-            "🧇", "🥓", "🥩", "🍗", "🍖", "🌭", "🍔", "🍟", "🍕", "🥪",
-            "🥙", "🧆", "🌮", "🌯", "🥗", "🥘", "🥫", "🍝", "🍜", "🍲",
-            "🍛", "🍣", "🍱", "🥟", "🍤", "🍙", "🍚", "🍦", "🍧", "🍨",
-            "🍩", "🍪", "🎂", "🍰", "🧁", "🥧", "🍫", "🍬", "🍭", "🍮",
-            "🍯", "🥛", "🍼", "☕️", "🫖", "🍵", "🧃", "🥤", "🧋", "🍺"
+            "🧇", "🥓", "🥩", "🍗", "🍖", "🌭", "🍔", "🍟", "🍕", "🥪"
         )
     }
 
-    val emojiObjects = remember {
+    val rawObjects = remember {
         listOf(
-            "⚽", "🏀", "🏈", "⚾️", "🥎", "🎾", "🏐", "🏐", "🥏", "🎱",
-            "🏓", "🏸", "🏒", "🏏", "⛳️", "🏹", "🥊", "🥋", "🛹", "🛼",
-            "🎽", "🏆", "🥇", "🥈", "🥉", "🎖️", "🎟️", "🎫", "🎪", "🎭",
-            "🎨", "🎬", "🎤", "🎧", "🎼", "🎹", "🥁", "🎷", "🎺", "🎸",
-            "🎲", "🎯", "🎳", "🎮", "🚗", "🚕", "🚙", "🚌", "🏎️", "🚓",
-            "🚑", "🚒", "🚐", "🚚", "🚲", "🛵", "🏍️", "🚨", "✈️", "🚀"
+            "⚽", "🏀", "🏈", "⚾️", "🥎", "🎾", "🏐", "🥏", "🎱", "🏓",
+            "🏸", "🏒", "🏏", "⛳️", "🏹", "🥊", "🥋", "🛹", "🛼", "🎽",
+            "🏆", "🥇", "🥈", "🥉", "🎖️", "🎟️", "🎫", "🎪", "🎭", "🎨",
+            "🎬", "🎤", "🎧", "🎼", "🎹", "🥁", "🎷", "🎺", "🎸", "🎲"
         )
     }
+
+    // Filter using Native Android SDK Paint.hasGlyph to prevent missing glyph / tofu boxes
+    val emojiSmileys = remember { NativeEmojiHelper.filterSupportedEmojis(rawSmileys) }
+    val emojiGestures = remember { NativeEmojiHelper.filterSupportedEmojis(rawGestures) }
+    val emojiStars = remember { NativeEmojiHelper.filterSupportedEmojis(rawStars) }
+    val emojiHearts = remember { NativeEmojiHelper.filterSupportedEmojis(rawHearts) }
+    val emojiAnimals = remember { NativeEmojiHelper.filterSupportedEmojis(rawAnimals) }
+    val emojiFood = remember { NativeEmojiHelper.filterSupportedEmojis(rawFood) }
+    val emojiObjects = remember { NativeEmojiHelper.filterSupportedEmojis(rawObjects) }
 
     Column(
         modifier = Modifier

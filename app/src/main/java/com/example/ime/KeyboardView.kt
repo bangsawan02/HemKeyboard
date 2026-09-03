@@ -1,5 +1,7 @@
 package com.example.ime
 
+import android.view.View
+import android.view.inputmethod.EditorInfo
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -7,25 +9,25 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardBackspace
-import androidx.compose.material.icons.filled.ArrowUpward
-import androidx.compose.material.icons.filled.KeyboardCapslock
-import androidx.compose.material.icons.filled.SentimentSatisfiedAlt
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ime.ui.CodingBarView
 import com.example.ime.ui.EditKeyboardView
 import com.example.ime.ui.EmojiKeyboardView
 import com.example.ime.ui.KeyButton
@@ -38,6 +40,13 @@ import com.example.ui.theme.getKeyboardColors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 
+enum class KeyboardMode {
+    FULL,
+    ONE_HANDED_LEFT,
+    ONE_HANDED_RIGHT,
+    FLOATING
+}
+
 sealed class KeyboardLayoutState {
     object QWERTY_LOWER : KeyboardLayoutState()
     object QWERTY_UPPER : KeyboardLayoutState()
@@ -45,16 +54,6 @@ sealed class KeyboardLayoutState {
     object SYMBOLS : KeyboardLayoutState()
     object EDIT : KeyboardLayoutState()
     object EMOJI : KeyboardLayoutState()
-}
-
-enum class EmojiCategory(val icon: String, val title: String) {
-    SMILEYS("😀", "Wajah"),
-    GESTURES("👍", "Gestur"),
-    HEARTS("❤️", "Simbol"),
-    STAR("⭐", "Favorit"),
-    ANIMALS("🐱", "Hewan"),
-    FOOD("🍔", "Makanan"),
-    OBJECTS("⚽", "Objek")
 }
 
 @Composable
@@ -66,15 +65,20 @@ fun KeyboardView(
     activeTheme: KeyboardThemeStyle,
     heightStyle: KeyboardHeightStyle = KeyboardHeightStyle.NORMAL,
     shapeStyle: KeyShapeStyle = KeyShapeStyle.ROUNDED,
-    codingBarEnabled: Boolean = true,
-    cursorArrowsEnabled: Boolean = true,
-    codeSnippetsEnabled: Boolean = true,
     autoCapitalizeNext: Boolean = false,
     currentWord: String = "",
+    actionLabel: String = "Enter",
+    clipboardText: String? = null,
+    isVoiceListening: Boolean = false,
+    onVoiceClick: () -> Unit = {},
+    inlineSuggestionViews: List<View> = emptyList(),
+    onSwitchIme: () -> Unit = {},
+    enableKeyPreview: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val colors = getKeyboardColors(activeTheme)
     var layoutState by remember { mutableStateOf<KeyboardLayoutState>(KeyboardLayoutState.QWERTY_LOWER) }
+    var keyboardMode by remember { mutableStateOf(KeyboardMode.FULL) }
 
     val keyHeight = heightStyle.keyHeightDp.dp
     val fontSize = heightStyle.fontSizeSp.sp
@@ -144,6 +148,12 @@ fun KeyboardView(
         }
     }
 
+    val handleBackToAbc = remember {
+        {
+            layoutState = KeyboardLayoutState.QWERTY_LOWER
+        }
+    }
+
     val row1 = listOf("q", "w", "e", "r", "t", "y", "u", "i", "o", "p")
     val row1Hints = listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "0")
     val row2 = listOf("a", "s", "d", "f", "g", "h", "j", "k", "l")
@@ -155,13 +165,343 @@ fun KeyboardView(
     val symRow2 = listOf("@", "#", "$", "%", "&", "-", "+", "(", ")", "/")
     val symRow3 = listOf("*", "\"", "'", ":", ";", "!", "?")
 
-    Column(
+    // Main Layout container with One-Handed Mode and Floating Mode styling
+    Box(
         modifier = modifier
             .fillMaxWidth()
             .background(colors.background)
-            .padding(vertical = 4.dp, horizontal = 3.dp)
     ) {
-        // 1. Word Suggestion Bar (Komponen UI Bar Saran Kata)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = when (keyboardMode) {
+                KeyboardMode.ONE_HANDED_LEFT -> Arrangement.Start
+                KeyboardMode.ONE_HANDED_RIGHT -> Arrangement.End
+                KeyboardMode.FLOATING -> Arrangement.Center
+                KeyboardMode.FULL -> Arrangement.Start
+            }
+        ) {
+            // One Handed Left: Right control strip
+            if (keyboardMode == KeyboardMode.ONE_HANDED_LEFT) {
+                Column(
+                    modifier = Modifier
+                        .weight(0.80f)
+                        .padding(vertical = 4.dp, horizontal = 2.dp)
+                ) {
+                    KeyboardMainContent(
+                        colors = colors,
+                        layoutState = layoutState,
+                        keyHeight = keyHeight,
+                        fontSize = fontSize,
+                        cornerRadius = cornerRadius,
+                        suggestionHeight = suggestionHeight,
+                        heightStyle = heightStyle,
+                        predictions = predictions,
+                        currentWord = currentWord,
+                        onPredictionClick = onPredictionClick,
+                        onSpecialPress = onSpecialPress,
+                        handleKeyPress = handleKeyPress,
+                        handleBackspace = handleBackspace,
+                        handleSpace = handleSpace,
+                        handleEnter = handleEnter,
+                        handleShiftClick = handleShiftClick,
+                        handleSymToggle = handleSymToggle,
+                        handleEditToggle = handleEditToggle,
+                        handleEmojiToggle = handleEmojiToggle,
+                        onBackToAbc = handleBackToAbc,
+                        onVoiceClick = onVoiceClick,
+                        isVoiceListening = isVoiceListening,
+                        clipboardText = clipboardText,
+                        inlineSuggestionViews = inlineSuggestionViews,
+                        onSwitchIme = onSwitchIme,
+                        actionLabel = actionLabel,
+                        row1 = row1,
+                        row1Hints = row1Hints,
+                        row2 = row2,
+                        row2Hints = row2Hints,
+                        row3 = row3,
+                        row3Hints = row3Hints,
+                        symRow1 = symRow1,
+                        symRow2 = symRow2,
+                        symRow3 = symRow3,
+                        enableKeyPreview = enableKeyPreview
+                    )
+                }
+
+                OneHandedSideBar(
+                    modifier = Modifier.weight(0.20f),
+                    colors = colors,
+                    onExpandFull = { keyboardMode = KeyboardMode.FULL },
+                    onSwitchSide = { keyboardMode = KeyboardMode.ONE_HANDED_RIGHT },
+                    onToggleFloating = { keyboardMode = KeyboardMode.FLOATING }
+                )
+            } else if (keyboardMode == KeyboardMode.ONE_HANDED_RIGHT) {
+                OneHandedSideBar(
+                    modifier = Modifier.weight(0.20f),
+                    colors = colors,
+                    onExpandFull = { keyboardMode = KeyboardMode.FULL },
+                    onSwitchSide = { keyboardMode = KeyboardMode.ONE_HANDED_LEFT },
+                    onToggleFloating = { keyboardMode = KeyboardMode.FLOATING }
+                )
+
+                Column(
+                    modifier = Modifier
+                        .weight(0.80f)
+                        .padding(vertical = 4.dp, horizontal = 2.dp)
+                ) {
+                    KeyboardMainContent(
+                        colors = colors,
+                        layoutState = layoutState,
+                        keyHeight = keyHeight,
+                        fontSize = fontSize,
+                        cornerRadius = cornerRadius,
+                        suggestionHeight = suggestionHeight,
+                        heightStyle = heightStyle,
+                        predictions = predictions,
+                        currentWord = currentWord,
+                        onPredictionClick = onPredictionClick,
+                        onSpecialPress = onSpecialPress,
+                        handleKeyPress = handleKeyPress,
+                        handleBackspace = handleBackspace,
+                        handleSpace = handleSpace,
+                        handleEnter = handleEnter,
+                        handleShiftClick = handleShiftClick,
+                        handleSymToggle = handleSymToggle,
+                        handleEditToggle = handleEditToggle,
+                        handleEmojiToggle = handleEmojiToggle,
+                        onBackToAbc = handleBackToAbc,
+                        onVoiceClick = onVoiceClick,
+                        isVoiceListening = isVoiceListening,
+                        clipboardText = clipboardText,
+                        inlineSuggestionViews = inlineSuggestionViews,
+                        onSwitchIme = onSwitchIme,
+                        actionLabel = actionLabel,
+                        row1 = row1,
+                        row1Hints = row1Hints,
+                        row2 = row2,
+                        row2Hints = row2Hints,
+                        row3 = row3,
+                        row3Hints = row3Hints,
+                        symRow1 = symRow1,
+                        symRow2 = symRow2,
+                        symRow3 = symRow3,
+                        enableKeyPreview = enableKeyPreview
+                    )
+                }
+            } else if (keyboardMode == KeyboardMode.FLOATING) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.92f)
+                        .padding(vertical = 6.dp)
+                        .shadow(8.dp, RoundedCornerShape(12.dp))
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(colors.background)
+                        .border(1.dp, colors.keyBorderColor.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+                        .padding(4.dp)
+                ) {
+                    Column {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(26.dp)
+                                .background(colors.specialKeyBackground.copy(alpha = 0.5f))
+                                .padding(horizontal = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Keyboard Melayang (Floating)",
+                                fontSize = 11.sp,
+                                color = colors.specialKeyText,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Row {
+                                Icon(
+                                    imageVector = Icons.Default.Fullscreen,
+                                    contentDescription = "Layar Penuh",
+                                    tint = colors.textHighlight,
+                                    modifier = Modifier
+                                        .size(20.dp)
+                                        .clickable { keyboardMode = KeyboardMode.FULL }
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(3.dp))
+
+                        KeyboardMainContent(
+                            colors = colors,
+                            layoutState = layoutState,
+                            keyHeight = (keyHeight.value * 0.9f).dp,
+                            fontSize = (fontSize.value * 0.9f).sp,
+                            cornerRadius = cornerRadius,
+                            suggestionHeight = suggestionHeight,
+                            heightStyle = heightStyle,
+                            predictions = predictions,
+                            currentWord = currentWord,
+                            onPredictionClick = onPredictionClick,
+                            onSpecialPress = onSpecialPress,
+                            handleKeyPress = handleKeyPress,
+                            handleBackspace = handleBackspace,
+                            handleSpace = handleSpace,
+                            handleEnter = handleEnter,
+                            handleShiftClick = handleShiftClick,
+                            handleSymToggle = handleSymToggle,
+                            handleEditToggle = handleEditToggle,
+                            handleEmojiToggle = handleEmojiToggle,
+                            onBackToAbc = handleBackToAbc,
+                            onVoiceClick = onVoiceClick,
+                            isVoiceListening = isVoiceListening,
+                            clipboardText = clipboardText,
+                            inlineSuggestionViews = inlineSuggestionViews,
+                            onSwitchIme = onSwitchIme,
+                            actionLabel = actionLabel,
+                            row1 = row1,
+                            row1Hints = row1Hints,
+                            row2 = row2,
+                            row2Hints = row2Hints,
+                            row3 = row3,
+                            row3Hints = row3Hints,
+                            symRow1 = symRow1,
+                            symRow2 = symRow2,
+                            symRow3 = symRow3,
+                            enableKeyPreview = enableKeyPreview
+                        )
+                    }
+                }
+            } else {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp, horizontal = 3.dp)
+                ) {
+                    KeyboardMainContent(
+                        colors = colors,
+                        layoutState = layoutState,
+                        keyHeight = keyHeight,
+                        fontSize = fontSize,
+                        cornerRadius = cornerRadius,
+                        suggestionHeight = suggestionHeight,
+                        heightStyle = heightStyle,
+                        predictions = predictions,
+                        currentWord = currentWord,
+                        onPredictionClick = onPredictionClick,
+                        onSpecialPress = onSpecialPress,
+                        handleKeyPress = handleKeyPress,
+                        handleBackspace = handleBackspace,
+                        handleSpace = handleSpace,
+                        handleEnter = handleEnter,
+                        handleShiftClick = handleShiftClick,
+                        handleSymToggle = handleSymToggle,
+                        handleEditToggle = handleEditToggle,
+                        handleEmojiToggle = handleEmojiToggle,
+                        onBackToAbc = handleBackToAbc,
+                        onVoiceClick = onVoiceClick,
+                        isVoiceListening = isVoiceListening,
+                        clipboardText = clipboardText,
+                        inlineSuggestionViews = inlineSuggestionViews,
+                        onSwitchIme = onSwitchIme,
+                        onToggleOneHanded = { keyboardMode = KeyboardMode.ONE_HANDED_RIGHT },
+                        actionLabel = actionLabel,
+                        row1 = row1,
+                        row1Hints = row1Hints,
+                        row2 = row2,
+                        row2Hints = row2Hints,
+                        row3 = row3,
+                        row3Hints = row3Hints,
+                        symRow1 = symRow1,
+                        symRow2 = symRow2,
+                        symRow3 = symRow3,
+                        enableKeyPreview = enableKeyPreview
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OneHandedSideBar(
+    modifier: Modifier = Modifier,
+    colors: KeyboardColors,
+    onExpandFull: () -> Unit,
+    onSwitchSide: () -> Unit,
+    onToggleFloating: () -> Unit
+) {
+    Column(
+        modifier = modifier
+            .fillMaxHeight()
+            .background(colors.specialKeyBackground.copy(alpha = 0.4f))
+            .padding(vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.SpaceEvenly
+    ) {
+        IconButton(onClick = onExpandFull) {
+            Icon(
+                imageVector = Icons.Default.Fullscreen,
+                contentDescription = "Layar Penuh",
+                tint = colors.textHighlight
+            )
+        }
+
+        IconButton(onClick = onSwitchSide) {
+            Icon(
+                imageVector = Icons.Default.SwapHoriz,
+                contentDescription = "Pindah Sisi",
+                tint = colors.specialKeyText
+            )
+        }
+
+        IconButton(onClick = onToggleFloating) {
+            Icon(
+                imageVector = Icons.Default.OpenInNew,
+                contentDescription = "Mode Melayang",
+                tint = colors.specialKeyText
+            )
+        }
+    }
+}
+
+@Composable
+private fun KeyboardMainContent(
+    colors: KeyboardColors,
+    layoutState: KeyboardLayoutState,
+    keyHeight: androidx.compose.ui.unit.Dp,
+    fontSize: androidx.compose.ui.unit.TextUnit,
+    cornerRadius: androidx.compose.ui.unit.Dp,
+    suggestionHeight: androidx.compose.ui.unit.Dp,
+    heightStyle: KeyboardHeightStyle,
+    predictions: List<String>,
+    currentWord: String,
+    onPredictionClick: (String) -> Unit,
+    onSpecialPress: (String) -> Unit,
+    handleKeyPress: (String) -> Unit,
+    handleBackspace: () -> Unit,
+    handleSpace: () -> Unit,
+    handleEnter: () -> Unit,
+    handleShiftClick: () -> Unit,
+    handleSymToggle: () -> Unit,
+    handleEditToggle: () -> Unit,
+    handleEmojiToggle: () -> Unit,
+    onBackToAbc: () -> Unit,
+    onVoiceClick: () -> Unit,
+    isVoiceListening: Boolean,
+    clipboardText: String?,
+    inlineSuggestionViews: List<View>,
+    onSwitchIme: () -> Unit,
+    onToggleOneHanded: (() -> Unit)? = null,
+    actionLabel: String,
+    row1: List<String>,
+    row1Hints: List<String>,
+    row2: List<String>,
+    row2Hints: List<String>,
+    row3: List<String>,
+    row3Hints: List<String>,
+    symRow1: List<String>,
+    symRow2: List<String>,
+    symRow3: List<String>,
+    enableKeyPreview: Boolean
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
         WordSuggestionBar(
             predictions = predictions,
             currentWord = currentWord,
@@ -173,51 +513,17 @@ fun KeyboardView(
             heightStyle = heightStyle,
             layoutState = layoutState,
             onEditToggle = handleEditToggle,
-            onEmojiToggle = handleEmojiToggle
+            onEmojiToggle = handleEmojiToggle,
+            onVoiceClick = onVoiceClick,
+            isVoiceListening = isVoiceListening,
+            clipboardText = clipboardText,
+            onClipboardPaste = { text -> onSpecialPress("COMMIT:$text") },
+            inlineSuggestionViews = inlineSuggestionViews,
+            onSwitchIme = onSwitchIme
         )
-
-        // 2. Optional Coding & Arrow Keys Bar
-        if (codingBarEnabled && layoutState != KeyboardLayoutState.EDIT && layoutState != KeyboardLayoutState.EMOJI) {
-            Spacer(modifier = Modifier.height(3.dp))
-            CodingBarView(
-                onSpecialPress = onSpecialPress,
-                colors = colors,
-                barHeight = (keyHeight.value * 0.75f).dp,
-                cornerRadius = cornerRadius,
-                showArrows = cursorArrowsEnabled,
-                showSnippets = codeSnippetsEnabled
-            )
-        }
-
-        // 3. Baris Angka Keyboard (Dedicated Number Row 1..0)
-        if (layoutState == KeyboardLayoutState.QWERTY_LOWER || 
-            layoutState == KeyboardLayoutState.QWERTY_UPPER || 
-            layoutState == KeyboardLayoutState.QWERTY_CAPS_LOCK) {
-            
-            Spacer(modifier = Modifier.height(3.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly
-            ) {
-                listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "0").forEach { numKey ->
-                    KeyButton(
-                        text = numKey,
-                        onKeyClick = handleKeyPress,
-                        modifier = Modifier.weight(1f),
-                        keyHeight = (keyHeight.value * 0.82f).dp,
-                        fontSize = (heightStyle.fontSizeSp - 3).coerceAtLeast(12).sp,
-                        cornerRadius = cornerRadius,
-                        borderColor = colors.keyBorderColor,
-                        backgroundColor = colors.keyBackground,
-                        textColor = colors.keyText
-                    )
-                }
-            }
-        }
 
         Spacer(modifier = Modifier.height(4.dp))
 
-        // 4. Main Keyboard Layout State
         when (layoutState) {
             KeyboardLayoutState.QWERTY_LOWER, KeyboardLayoutState.QWERTY_UPPER, KeyboardLayoutState.QWERTY_CAPS_LOCK -> {
                 val isUpper = layoutState != KeyboardLayoutState.QWERTY_LOWER
@@ -235,7 +541,8 @@ fun KeyboardView(
                             cornerRadius = cornerRadius,
                             borderColor = colors.keyBorderColor,
                             backgroundColor = colors.keyBackground,
-                            textColor = colors.keyText
+                            textColor = colors.keyText,
+                            enableKeyPreview = enableKeyPreview
                         )
                     }
                 }
@@ -256,7 +563,8 @@ fun KeyboardView(
                             cornerRadius = cornerRadius,
                             borderColor = colors.keyBorderColor,
                             backgroundColor = colors.keyBackground,
-                            textColor = colors.keyText
+                            textColor = colors.keyText,
+                            enableKeyPreview = enableKeyPreview
                         )
                     }
                     Spacer(modifier = Modifier.weight(0.5f))
@@ -269,7 +577,6 @@ fun KeyboardView(
                     val shiftInteraction = remember { MutableInteractionSource() }
                     val isShiftPressed by shiftInteraction.collectIsPressedAsState()
 
-                    // Shift Key
                     Box(
                         modifier = Modifier
                             .weight(1.5f)
@@ -321,13 +628,14 @@ fun KeyboardView(
                             cornerRadius = cornerRadius,
                             borderColor = colors.keyBorderColor,
                             backgroundColor = colors.keyBackground,
-                            textColor = colors.keyText
+                            textColor = colors.keyText,
+                            enableKeyPreview = enableKeyPreview
                         )
                     }
 
-                    // Backspace Key with continuous deletion on hold
                     val backspaceInteraction = remember { MutableInteractionSource() }
                     val isBackspacePressed by backspaceInteraction.collectIsPressedAsState()
+                    var backspaceDragAmount by remember { mutableFloatStateOf(0f) }
 
                     LaunchedEffect(isBackspacePressed) {
                         if (isBackspacePressed) {
@@ -354,6 +662,19 @@ fun KeyboardView(
                                     Modifier.border(0.8.dp, colors.keyBorderColor.copy(alpha = 0.5f), RoundedCornerShape(cornerRadius))
                                 else Modifier
                             )
+                            .pointerInput(Unit) {
+                                detectHorizontalDragGestures(
+                                    onDragEnd = { backspaceDragAmount = 0f },
+                                    onDragCancel = { backspaceDragAmount = 0f },
+                                    onHorizontalDrag = { _, dragAmountPx ->
+                                        backspaceDragAmount += dragAmountPx
+                                        if (backspaceDragAmount < -45f) {
+                                            onSpecialPress("DELETE_WORD")
+                                            backspaceDragAmount = 0f
+                                        }
+                                    }
+                                )
+                            }
                             .clickable(
                                 interactionSource = backspaceInteraction,
                                 indication = null
@@ -372,7 +693,6 @@ fun KeyboardView(
             }
 
             KeyboardLayoutState.SYMBOLS -> {
-                // Row 1 (Numbers)
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                     symRow1.forEach { char ->
                         KeyButton(
@@ -384,14 +704,14 @@ fun KeyboardView(
                             cornerRadius = cornerRadius,
                             borderColor = colors.keyBorderColor,
                             backgroundColor = colors.keyBackground,
-                            textColor = colors.keyText
+                            textColor = colors.keyText,
+                            enableKeyPreview = enableKeyPreview
                         )
                     }
                 }
 
                 Spacer(modifier = Modifier.height(5.dp))
 
-                // Row 2 (Symbols 1)
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                     symRow2.forEach { char ->
                         KeyButton(
@@ -403,16 +723,15 @@ fun KeyboardView(
                             cornerRadius = cornerRadius,
                             borderColor = colors.keyBorderColor,
                             backgroundColor = colors.keyBackground,
-                            textColor = colors.keyText
+                            textColor = colors.keyText,
+                            enableKeyPreview = enableKeyPreview
                         )
                     }
                 }
 
                 Spacer(modifier = Modifier.height(5.dp))
 
-                // Row 3 (Symbols 2 + Backspace)
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    // Back to ABC toggle
                     Box(
                         modifier = Modifier
                             .weight(1.5f)
@@ -425,7 +744,7 @@ fun KeyboardView(
                                     Modifier.border(0.8.dp, colors.keyBorderColor.copy(alpha = 0.5f), RoundedCornerShape(cornerRadius))
                                 else Modifier
                             )
-                            .clickable { layoutState = KeyboardLayoutState.QWERTY_LOWER },
+                            .clickable { onBackToAbc() },
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
@@ -446,11 +765,11 @@ fun KeyboardView(
                             cornerRadius = cornerRadius,
                             borderColor = colors.keyBorderColor,
                             backgroundColor = colors.keyBackground,
-                            textColor = colors.keyText
+                            textColor = colors.keyText,
+                            enableKeyPreview = enableKeyPreview
                         )
                     }
 
-                    // Backspace
                     Box(
                         modifier = Modifier
                             .weight(1.5f)
@@ -479,7 +798,7 @@ fun KeyboardView(
             KeyboardLayoutState.EDIT -> {
                 EditKeyboardView(
                     onSpecialPress = { action -> onSpecialPress(action) },
-                    onBackToAbc = { layoutState = KeyboardLayoutState.QWERTY_LOWER },
+                    onBackToAbc = { onBackToAbc() },
                     colors = colors,
                     keyHeight = keyHeight,
                     fontSize = fontSize,
@@ -500,324 +819,145 @@ fun KeyboardView(
 
         Spacer(modifier = Modifier.height(5.dp))
 
-        // 5. Bottom Navigation & Action Bar
+        // Bottom Navigation & Space Action Row
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-            if (layoutState == KeyboardLayoutState.EMOJI) {
-                // ABC Toggle
-                Box(
-                    modifier = Modifier
-                        .weight(1.2f)
-                        .height(keyHeight)
-                        .padding(horizontal = 1.5.dp)
-                        .clip(RoundedCornerShape(cornerRadius))
-                        .background(colors.specialKeyBackground)
-                        .then(
-                            if (colors.keyBorderColor != Color.Transparent)
-                                Modifier.border(0.8.dp, colors.keyBorderColor.copy(alpha = 0.5f), RoundedCornerShape(cornerRadius))
-                            else Modifier
-                        )
-                        .clickable { layoutState = KeyboardLayoutState.QWERTY_LOWER },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "abc",
-                        color = colors.specialKeyText,
-                        fontSize = (heightStyle.fontSizeSp - 3).coerceAtLeast(13).sp,
-                        fontWeight = FontWeight.Bold
+            val symInteraction = remember { MutableInteractionSource() }
+            val isSymPressed by symInteraction.collectIsPressedAsState()
+
+            Box(
+                modifier = Modifier
+                    .weight(1.1f)
+                    .height(keyHeight)
+                    .padding(horizontal = 1.5.dp)
+                    .clip(RoundedCornerShape(cornerRadius))
+                    .background(if (isSymPressed) colors.specialKeyBackground.copy(alpha = 0.65f) else colors.specialKeyBackground)
+                    .then(
+                        if (colors.keyBorderColor != Color.Transparent)
+                            Modifier.border(0.8.dp, colors.keyBorderColor.copy(alpha = 0.5f), RoundedCornerShape(cornerRadius))
+                        else Modifier
                     )
-                }
-
-                // ?123 Toggle
-                Box(
-                    modifier = Modifier
-                        .weight(1.1f)
-                        .height(keyHeight)
-                        .padding(horizontal = 1.5.dp)
-                        .clip(RoundedCornerShape(cornerRadius))
-                        .background(colors.specialKeyBackground)
-                        .then(
-                            if (colors.keyBorderColor != Color.Transparent)
-                                Modifier.border(0.8.dp, colors.keyBorderColor.copy(alpha = 0.5f), RoundedCornerShape(cornerRadius))
-                            else Modifier
-                        )
-                        .clickable { layoutState = KeyboardLayoutState.SYMBOLS },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "?123",
-                        color = colors.specialKeyText,
-                        fontSize = (heightStyle.fontSizeSp - 3).coerceAtLeast(12).sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                // Edit Toggle
-                Box(
-                    modifier = Modifier
-                        .weight(0.9f)
-                        .height(keyHeight)
-                        .padding(horizontal = 1.5.dp)
-                        .clip(RoundedCornerShape(cornerRadius))
-                        .background(colors.specialKeyBackground)
-                        .then(
-                            if (colors.keyBorderColor != Color.Transparent)
-                                Modifier.border(0.8.dp, colors.keyBorderColor.copy(alpha = 0.5f), RoundedCornerShape(cornerRadius))
-                            else Modifier
-                        )
-                        .clickable { handleEditToggle() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "Edit",
-                        color = colors.specialKeyText,
-                        fontSize = (heightStyle.fontSizeSp - 3).coerceAtLeast(12).sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                // Space Key
-                Box(
-                    modifier = Modifier
-                        .weight(3.0f)
-                        .height(keyHeight)
-                        .padding(horizontal = 1.5.dp)
-                        .clip(RoundedCornerShape(cornerRadius))
-                        .background(colors.keyBackground)
-                        .clickable { handleSpace() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "Spasi",
-                        color = colors.keyText.copy(alpha = 0.6f),
-                        fontSize = (heightStyle.fontSizeSp - 4).coerceAtLeast(12).sp
-                    )
-                }
-
-                // Backspace
-                Box(
-                    modifier = Modifier
-                        .weight(1.3f)
-                        .height(keyHeight)
-                        .padding(horizontal = 1.5.dp)
-                        .clip(RoundedCornerShape(cornerRadius))
-                        .background(colors.specialKeyBackground)
-                        .then(
-                            if (colors.keyBorderColor != Color.Transparent)
-                                Modifier.border(0.8.dp, colors.keyBorderColor.copy(alpha = 0.5f), RoundedCornerShape(cornerRadius))
-                            else Modifier
-                        )
-                        .clickable { handleBackspace() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.KeyboardBackspace,
-                        contentDescription = "Hapus",
-                        tint = colors.specialKeyText,
-                        modifier = Modifier.size((heightStyle.keyHeightDp * 0.42).dp.coerceIn(18.dp, 24.dp))
-                    )
-                }
-
-                // Enter
-                Box(
-                    modifier = Modifier
-                        .weight(1.3f)
-                        .height(keyHeight)
-                        .padding(horizontal = 1.5.dp)
-                        .clip(RoundedCornerShape(cornerRadius))
-                        .background(colors.actionKeyBackground)
-                        .clickable { handleEnter() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "Enter",
-                        color = colors.actionKeyText,
-                        fontSize = (heightStyle.fontSizeSp - 4).coerceAtLeast(12).sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            } else {
-                val symInteraction = remember { MutableInteractionSource() }
-                val isSymPressed by symInteraction.collectIsPressedAsState()
-
-                // Sym Toggle
-                Box(
-                    modifier = Modifier
-                        .weight(1.1f)
-                        .height(keyHeight)
-                        .padding(horizontal = 1.5.dp)
-                        .clip(RoundedCornerShape(cornerRadius))
-                        .background(if (isSymPressed) colors.specialKeyBackground.copy(alpha = 0.65f) else colors.specialKeyBackground)
-                        .then(
-                            if (colors.keyBorderColor != Color.Transparent)
-                                Modifier.border(0.8.dp, colors.keyBorderColor.copy(alpha = 0.5f), RoundedCornerShape(cornerRadius))
-                            else Modifier
-                        )
-                        .clickable(interactionSource = symInteraction, indication = null) { handleSymToggle() }
-                        .testTag("key_symbols_toggle"),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = if (layoutState == KeyboardLayoutState.SYMBOLS) "abc" else "?123",
-                        color = colors.specialKeyText,
-                        fontSize = (heightStyle.fontSizeSp - 3).coerceAtLeast(13).sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                val emojiInteraction = remember { MutableInteractionSource() }
-                val isEmojiPressed by emojiInteraction.collectIsPressedAsState()
-
-                // Emoji Toggle Button
-                Box(
-                    modifier = Modifier
-                        .weight(0.9f)
-                        .height(keyHeight)
-                        .padding(horizontal = 1.5.dp)
-                        .clip(RoundedCornerShape(cornerRadius))
-                        .background(if (isEmojiPressed) colors.specialKeyBackground.copy(alpha = 0.65f) else colors.specialKeyBackground)
-                        .then(
-                            if (colors.keyBorderColor != Color.Transparent)
-                                Modifier.border(0.8.dp, colors.keyBorderColor.copy(alpha = 0.5f), RoundedCornerShape(cornerRadius))
-                            else Modifier
-                        )
-                        .clickable(interactionSource = emojiInteraction, indication = null) { handleEmojiToggle() }
-                        .testTag("key_emoji_toggle"),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.SentimentSatisfiedAlt,
-                        contentDescription = "Emoji",
-                        tint = colors.specialKeyText,
-                        modifier = Modifier.size((heightStyle.keyHeightDp * 0.42).dp.coerceIn(18.dp, 24.dp))
-                    )
-                }
-
-                val editInteraction = remember { MutableInteractionSource() }
-                val isEditPressed by editInteraction.collectIsPressedAsState()
-
-                // Edit Mode Toggle Button
-                Box(
-                    modifier = Modifier
-                        .weight(1.0f)
-                        .height(keyHeight)
-                        .padding(horizontal = 1.5.dp)
-                        .clip(RoundedCornerShape(cornerRadius))
-                        .background(
-                            if (layoutState == KeyboardLayoutState.EDIT) colors.actionKeyBackground.copy(alpha = 0.35f)
-                            else if (isEditPressed) colors.specialKeyBackground.copy(alpha = 0.65f)
-                            else colors.specialKeyBackground
-                        )
-                        .then(
-                            if (colors.keyBorderColor != Color.Transparent)
-                                Modifier.border(0.8.dp, colors.keyBorderColor.copy(alpha = 0.5f), RoundedCornerShape(cornerRadius))
-                            else Modifier
-                        )
-                        .clickable(interactionSource = editInteraction, indication = null) { handleEditToggle() }
-                        .testTag("key_edit_toggle"),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "Edit",
-                        fontSize = (heightStyle.fontSizeSp - 3).coerceAtLeast(12).sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (layoutState == KeyboardLayoutState.EDIT) colors.textHighlight else colors.specialKeyText
-                    )
-                }
-
-                // Comma
-                KeyButton(
-                    text = ",",
-                    hintText = ";",
-                    onKeyClick = handleKeyPress,
-                    modifier = Modifier.weight(0.8f),
-                    keyHeight = keyHeight,
-                    fontSize = fontSize,
-                    cornerRadius = cornerRadius,
-                    borderColor = colors.keyBorderColor,
-                    backgroundColor = colors.keyBackground,
-                    textColor = colors.keyText
+                    .clickable(interactionSource = symInteraction, indication = null) { handleSymToggle() }
+                    .testTag("key_symbols_toggle"),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = if (layoutState == KeyboardLayoutState.SYMBOLS) "abc" else "?123",
+                    color = colors.specialKeyText,
+                    fontSize = (heightStyle.fontSizeSp - 3).coerceAtLeast(13).sp,
+                    fontWeight = FontWeight.Bold
                 )
+            }
 
-                // Space with drag cursor navigation & double-tap period
-                var bottomDragAmount by remember { mutableFloatStateOf(0f) }
-                val spaceInteraction = remember { MutableInteractionSource() }
-                val isSpacePressed by spaceInteraction.collectIsPressedAsState()
+            Box(
+                modifier = Modifier
+                    .weight(0.9f)
+                    .height(keyHeight)
+                    .padding(horizontal = 1.5.dp)
+                    .clip(RoundedCornerShape(cornerRadius))
+                    .background(colors.specialKeyBackground)
+                    .clickable { onSwitchIme() }
+                    .testTag("key_globe_switch"),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Language,
+                    contentDescription = "Ganti Bahasa / Keyboard",
+                    tint = colors.specialKeyText,
+                    modifier = Modifier.size((heightStyle.keyHeightDp * 0.40).dp.coerceIn(18.dp, 22.dp))
+                )
+            }
 
-                Box(
-                    modifier = Modifier
-                        .weight(3.5f)
-                        .height(keyHeight)
-                        .padding(horizontal = 1.5.dp)
-                        .clip(RoundedCornerShape(cornerRadius))
-                        .background(if (isSpacePressed) colors.keyBackground.copy(alpha = 0.65f) else colors.keyBackground)
-                        .then(
-                            if (colors.keyBorderColor != Color.Transparent)
-                                Modifier.border(0.8.dp, colors.keyBorderColor, RoundedCornerShape(cornerRadius))
-                            else Modifier
-                        )
-                        .pointerInput(Unit) {
-                            detectHorizontalDragGestures(
-                                onDragEnd = { bottomDragAmount = 0f },
-                                onDragCancel = { bottomDragAmount = 0f },
-                                onHorizontalDrag = { _, dragAmountPx ->
-                                    bottomDragAmount += dragAmountPx
-                                    if (bottomDragAmount > 30f) {
-                                        onSpecialPress("CURSOR_RIGHT")
-                                        bottomDragAmount = 0f
-                                    } else if (bottomDragAmount < -30f) {
-                                        onSpecialPress("CURSOR_LEFT")
-                                        bottomDragAmount = 0f
-                                    }
+            KeyButton(
+                text = ",",
+                hintText = ";",
+                onKeyClick = handleKeyPress,
+                modifier = Modifier.weight(0.8f),
+                keyHeight = keyHeight,
+                fontSize = fontSize,
+                cornerRadius = cornerRadius,
+                borderColor = colors.keyBorderColor,
+                backgroundColor = colors.keyBackground,
+                textColor = colors.keyText,
+                enableKeyPreview = enableKeyPreview
+            )
+
+            var bottomDragAmount by remember { mutableFloatStateOf(0f) }
+            val spaceInteraction = remember { MutableInteractionSource() }
+            val isSpacePressed by spaceInteraction.collectIsPressedAsState()
+
+            Box(
+                modifier = Modifier
+                    .weight(3.4f)
+                    .height(keyHeight)
+                    .padding(horizontal = 1.5.dp)
+                    .clip(RoundedCornerShape(cornerRadius))
+                    .background(if (isSpacePressed) colors.keyBackground.copy(alpha = 0.65f) else colors.keyBackground)
+                    .then(
+                        if (colors.keyBorderColor != Color.Transparent)
+                            Modifier.border(0.8.dp, colors.keyBorderColor, RoundedCornerShape(cornerRadius))
+                        else Modifier
+                    )
+                    .pointerInput(Unit) {
+                        detectHorizontalDragGestures(
+                            onDragEnd = { bottomDragAmount = 0f },
+                            onDragCancel = { bottomDragAmount = 0f },
+                            onHorizontalDrag = { _, dragAmountPx ->
+                                bottomDragAmount += dragAmountPx
+                                if (bottomDragAmount > 30f) {
+                                    onSpecialPress("CURSOR_RIGHT")
+                                    bottomDragAmount = 0f
+                                } else if (bottomDragAmount < -30f) {
+                                    onSpecialPress("CURSOR_LEFT")
+                                    bottomDragAmount = 0f
                                 }
-                            )
-                        }
-                        .clickable(interactionSource = spaceInteraction, indication = null) { handleSpace() }
-                        .testTag("key_space"),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "Spasi",
-                        color = colors.keyText.copy(alpha = 0.6f),
-                        fontSize = (heightStyle.fontSizeSp - 4).coerceAtLeast(12).sp
-                    )
-                }
-
-                // Period
-                KeyButton(
-                    text = ".",
-                    hintText = "!",
-                    onKeyClick = handleKeyPress,
-                    modifier = Modifier.weight(0.8f),
-                    keyHeight = keyHeight,
-                    fontSize = fontSize,
-                    cornerRadius = cornerRadius,
-                    borderColor = colors.keyBorderColor,
-                    backgroundColor = colors.keyBackground,
-                    textColor = colors.keyText
+                            }
+                        )
+                    }
+                    .clickable(interactionSource = spaceInteraction, indication = null) { handleSpace() }
+                    .testTag("key_space"),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "Spasi",
+                    color = colors.keyText.copy(alpha = 0.6f),
+                    fontSize = (heightStyle.fontSizeSp - 4).coerceAtLeast(12).sp
                 )
+            }
 
-                val enterInteraction = remember { MutableInteractionSource() }
-                val isEnterPressed by enterInteraction.collectIsPressedAsState()
+            KeyButton(
+                text = ".",
+                hintText = "!",
+                onKeyClick = handleKeyPress,
+                modifier = Modifier.weight(0.8f),
+                keyHeight = keyHeight,
+                fontSize = fontSize,
+                cornerRadius = cornerRadius,
+                borderColor = colors.keyBorderColor,
+                backgroundColor = colors.keyBackground,
+                textColor = colors.keyText,
+                enableKeyPreview = enableKeyPreview
+            )
 
-                // Enter / Action
-                Box(
-                    modifier = Modifier
-                        .weight(1.4f)
-                        .height(keyHeight)
-                        .padding(horizontal = 1.5.dp)
-                        .clip(RoundedCornerShape(cornerRadius))
-                        .background(if (isEnterPressed) colors.actionKeyBackground.copy(alpha = 0.75f) else colors.actionKeyBackground)
-                        .clickable(interactionSource = enterInteraction, indication = null) { handleEnter() }
-                        .testTag("key_enter"),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "Enter",
-                        color = colors.actionKeyText,
-                        fontSize = (heightStyle.fontSizeSp - 4).coerceAtLeast(12).sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
+            val enterInteraction = remember { MutableInteractionSource() }
+            val isEnterPressed by enterInteraction.collectIsPressedAsState()
+
+            Box(
+                modifier = Modifier
+                    .weight(1.3f)
+                    .height(keyHeight)
+                    .padding(horizontal = 1.5.dp)
+                    .clip(RoundedCornerShape(cornerRadius))
+                    .background(if (isEnterPressed) colors.actionKeyBackground.copy(alpha = 0.75f) else colors.actionKeyBackground)
+                    .clickable(interactionSource = enterInteraction, indication = null) { handleEnter() }
+                    .testTag("key_enter"),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = actionLabel,
+                    color = colors.actionKeyText,
+                    fontSize = (heightStyle.fontSizeSp - 4).coerceAtLeast(12).sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
         }
     }

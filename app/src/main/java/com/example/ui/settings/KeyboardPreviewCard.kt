@@ -24,10 +24,6 @@ fun KeyboardPreviewCard(
     activeTheme: KeyboardThemeStyle,
     heightStyle: KeyboardHeightStyle,
     shapeStyle: KeyShapeStyle,
-    codingBarEnabled: Boolean,
-    cursorArrowsEnabled: Boolean,
-    codeSnippetsEnabled: Boolean,
-    tabUsesSpaces: Boolean,
     modifier: Modifier = Modifier
 ) {
     var previewTypedText by remember { mutableStateOf("") }
@@ -58,7 +54,7 @@ fun KeyboardPreviewCard(
             }
 
             Text(
-                text = "Coba ketik langsung untuk melihat perubahan tinggi, bentuk tombol, dan tema secara real-time.",
+                text = "Coba ketik langsung untuk melihat tata letak, tema, dan responsivitas keyboard secara real-time.",
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
             )
@@ -74,7 +70,7 @@ fun KeyboardPreviewCard(
                     .padding(horizontal = 12.dp, vertical = 10.dp)
             ) {
                 Text(
-                    text = if (previewTypedText.isEmpty()) "Hasil ketikan pratinjau muncul di sini... (coba tekan tombol Edit)" else previewTypedText,
+                    text = if (previewTypedText.isEmpty()) "Hasil ketikan pratinjau muncul di sini... (coba ketik atau gunakan tombol Edit)" else previewTypedText,
                     color = if (previewTypedText.isEmpty()) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f) else MaterialTheme.colorScheme.onSurface,
                     fontSize = 14.sp,
                     fontFamily = FontFamily.Monospace,
@@ -99,7 +95,7 @@ fun KeyboardPreviewCard(
                             action == "BACKSPACE" -> if (previewTypedText.isNotEmpty()) previewTypedText = previewTypedText.dropLast(1)
                             action == "SPACE" -> previewTypedText += " "
                             action == "ENTER" -> previewTypedText += "\n"
-                            action == "TAB" -> previewTypedText += if (tabUsesSpaces) "    " else "\t"
+                            action == "TAB" -> previewTypedText += "    "
                             action == "SELECT_ALL" -> { /* Selected */ }
                             action == "COPY" -> { /* Copied */ }
                             action == "CUT" -> previewTypedText = ""
@@ -107,10 +103,6 @@ fun KeyboardPreviewCard(
                             action == "UNDO" -> if (previewTypedText.isNotEmpty()) previewTypedText = previewTypedText.dropLast(1)
                             action == "REDO" -> previewTypedText += " "
                             action == "DELETE_WORD" -> previewTypedText = previewTypedText.substringBeforeLast(" ", "")
-                            action == "DELETE_LINE" -> previewTypedText = previewTypedText.substringBeforeLast("\n", "")
-                            action == "ARROW_LEFT" -> { /* Cursor simulation */ }
-                            action == "ARROW_RIGHT" -> { /* Cursor simulation */ }
-                            action.startsWith("PAIR:") -> previewTypedText += action.removePrefix("PAIR:")
                             action.startsWith("COMMIT:") -> previewTypedText += action.removePrefix("COMMIT:")
                         }
                     },
@@ -120,10 +112,7 @@ fun KeyboardPreviewCard(
                     },
                     activeTheme = activeTheme,
                     heightStyle = heightStyle,
-                    shapeStyle = shapeStyle,
-                    codingBarEnabled = codingBarEnabled,
-                    cursorArrowsEnabled = cursorArrowsEnabled,
-                    codeSnippetsEnabled = codeSnippetsEnabled
+                    shapeStyle = shapeStyle
                 )
             }
         }

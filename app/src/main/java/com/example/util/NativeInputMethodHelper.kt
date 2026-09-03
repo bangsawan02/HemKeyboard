@@ -2,12 +2,15 @@ package com.example.util
 
 import android.content.Context
 import android.content.Intent
+import android.os.Build
+import android.os.IBinder
 import android.provider.Settings
 import android.view.inputmethod.InputMethodManager
+import android.view.inputmethod.InputMethodSubtype
 
 /**
- * Native Android SDK InputMethodManager helper.
- * Provides IME status checks and triggers native system intent pickers.
+ * Native Android SDK InputMethodManager & InputMethodSubtype helper.
+ * Provides IME status checks, subtype management, and triggers native system intent pickers.
  */
 object NativeInputMethodHelper {
 
@@ -40,7 +43,6 @@ object NativeInputMethodHelper {
             }
             context.startActivity(intent)
         } catch (_: Exception) {
-            // Fallback to general settings
             val intent = Intent(Settings.ACTION_SETTINGS).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK
             }
@@ -54,6 +56,37 @@ object NativeInputMethodHelper {
             imm?.showInputMethodPicker()
         } catch (_: Exception) {
             // Graceful fallback
+        }
+    }
+
+    fun getCurrentInputMethodSubtype(context: Context): InputMethodSubtype? {
+        return try {
+            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+            imm?.currentInputMethodSubtype
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun switchToNextInputMethod(context: Context, token: IBinder?, onlyCurrentIme: Boolean = false): Boolean {
+        if (token == null) {
+            showInputMethodPicker(context)
+            return true
+        }
+        return try {
+            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                imm?.switchToNextInputMethod(token, onlyCurrentIme) ?: false
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                @Suppress("DEPRECATION")
+                imm?.switchToNextInputMethod(token, onlyCurrentIme) ?: false
+            } else {
+                showInputMethodPicker(context)
+                true
+            }
+        } catch (_: Exception) {
+            showInputMethodPicker(context)
+            false
         }
     }
 }

@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">Keyboard Hemat</string>
+    <string name="subtype_id_id">Bahasa Indonesia (QWERTY)</string>
+    <string name="subtype_en_us">English (US)</string>
 </resources>

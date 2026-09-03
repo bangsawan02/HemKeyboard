@@ -81,10 +81,6 @@ fun SettingsScreen(
     val predictionEnabled by viewModel.predictionEnabled.collectAsState()
     val hapticEnabled by viewModel.hapticEnabled.collectAsState()
     val hapticDurationMs by viewModel.hapticDurationMs.collectAsState()
-    val codingBarEnabled by viewModel.codingBarEnabled.collectAsState()
-    val cursorArrowsEnabled by viewModel.cursorArrowsEnabled.collectAsState()
-    val codeSnippetsEnabled by viewModel.codeSnippetsEnabled.collectAsState()
-    val tabUsesSpaces by viewModel.tabUsesSpaces.collectAsStateWithLifecycle()
     
     val vowelOptionalEnabled by viewModel.vowelOptionalEnabled.collectAsStateWithLifecycle()
     val guessMissingLettersEnabled by viewModel.guessMissingLettersEnabled.collectAsStateWithLifecycle()
@@ -120,24 +116,10 @@ fun SettingsScreen(
         KeyboardPreviewCard(
             activeTheme = activeTheme,
             heightStyle = heightStyle,
-            shapeStyle = shapeStyle,
-            codingBarEnabled = codingBarEnabled,
-            cursorArrowsEnabled = cursorArrowsEnabled,
-            codeSnippetsEnabled = codeSnippetsEnabled,
-            tabUsesSpaces = tabUsesSpaces
+            shapeStyle = shapeStyle
         )
 
-        // 3. Fast Access & Text Editing Tools Card
-        CodingBarCard(
-            codingBarEnabled = codingBarEnabled,
-            onCodingBarChange = { viewModel.updateCodingBar(it) },
-            tabUsesSpaces = tabUsesSpaces,
-            onTabUsesSpacesChange = { viewModel.updateTabUsesSpaces(it) },
-            codeSnippetsEnabled = codeSnippetsEnabled,
-            onCodeSnippetsChange = { viewModel.updateCodeSnippets(it) }
-        )
-
-        // 4. Keyboard Appearance: Theme, Height, Key Shape Card
+        // 3. Keyboard Appearance: Theme, Height, Key Shape Card
         KeyboardAppearanceCard(
             activeTheme = activeTheme,
             onThemeChange = { viewModel.updateTheme(it) },
@@ -147,7 +129,7 @@ fun SettingsScreen(
             onShapeChange = { viewModel.updateShape(it) }
         )
 
-        // 5. Smart Prediction, Vowel Omission & Feedback Card
+        // 4. Smart Prediction, Vowel Omission & Feedback Card
         SmartPredictionCard(
             predictionEnabled = predictionEnabled,
             onPredictionChange = { viewModel.updatePrediction(it) },
@@ -169,7 +151,7 @@ fun SettingsScreen(
             onHapticDurationChange = { viewModel.updateHapticDuration(it) }
         )
 
-        // 6. Local User Dictionary Room Database Card
+        // 5. Local User Dictionary Room Database Card
         UserDictionaryCard(
             wordCount = wordCount,
             customWordCount = customWordCount,
@@ -183,7 +165,7 @@ fun SettingsScreen(
             onClearDictionary = { viewModel.clearDictionary() }
         )
 
-        // 7. System Typing Test Area Card
+        // 6. System Typing Test Area Card
         SystemTypingTestCard(isSelected = isSelected)
 
         Spacer(modifier = Modifier.height(24.dp))
